@@ -5,6 +5,10 @@
 This repository contains the workflow for analyzing multiple cruises using the
 flowmix model ([[https://arxiv.org/abs/2008.11251][preprint]] and [[https://github.com/sangwon-hyun/flowmix][software]]).
 
+The cruises are here ([[https://seaflow.netlify.app/][website]])
+#+ATTR_HTML: :style margin-left: auto; margin-right: auto;
+[[./seaflow-map.png]]
+
 ** Installation and usage
 The scripts named e.g. ~00-covariates.Rmd~ are to be run in order of the files'
 numbers. The relevant data files and outputs are placed in an identically named
