@@ -9,7 +9,11 @@ The scripts named e.g. ~00-covariates.Rmd~ are to be run in order of the files'
 numbers. The relevant data files and outputs are placed in an identically named
 directory called ~00-covariates~.
 
-** Rendered page
-[[./00-covariates.md]]
+** Structure
+
+*** Obtaining and cleaning covariates:
+[[http://htmlpreview.github.io/?https://github.com/sangwon-hyun/flowmixapp/blob/main/00-covariates.html][00-covariates.html]]
+
+*** Obtaining cytograms:
 
 
