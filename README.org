@@ -2,7 +2,8 @@
 
 
 ** Summary
-This repository shows the workflow for analyzing multiple cruises using the flowmix model.
+This repository contains the workflow for analyzing multiple cruises using the
+flowmix model ([[https://arxiv.org/abs/2008.11251][preprint]] and [[https://github.com/sangwon-hyun/flowmix][software]]).
 
 ** Installation and usage
 The scripts named e.g. ~00-covariates.Rmd~ are to be run in order of the files'
