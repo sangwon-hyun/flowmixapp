@@ -1,0 +1,10 @@
+#+title: Application of flowmix to multiple cruises
+
+
+* Summary
+This repository shows the workflow for analyzing multiple cruises using the flowmix model.
+
+* Installation and usage
+The scripts named e.g. ~00-covariates.Rmd~ are to be run in order of the files'
+numbers. The relevant data files and outputs are placed in an identically named
+directory called ~00-covariates~.
