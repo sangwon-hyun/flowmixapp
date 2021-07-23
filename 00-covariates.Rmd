@@ -224,7 +224,6 @@ Temperature and salinity data is fixed and interpolated whenever there's a gap
 shorter than 12 hours.
 
 ```{r clean-salinity-temperature}
-outputdir = "~/Dropbox/research/usc/flow-cytometry/data/colocalize"
 datlist_sss_sst_hourly = read.csv(file.path(outputdir, "clean_sfl.csv")) %>% as_tibble() %>%
   rename(id = cruise, time = DATE, sss_cruise = SALINITY, sst_cruise = TEMP) %>%
   filter(id %in% ids_final) %>% 
@@ -294,8 +293,6 @@ for(ii in 1:8){
     scale_x_datetime(date_labels = "%b%d\n%Y") +
     theme(strip.text.x = element_text(size = rel(1), face = "bold"))  -> p
   print(p)
-  ## ggsave(file = file.path(outputdir, paste0(id, "-cruise-covariates-", ii, ".png")),
-  ##        width = 16, height = 8)
 }
 
 datlist_combined = datlist_combined_lagged   ##.["KN210-04"] %>% 
@@ -309,7 +306,6 @@ cruise and variable.
 
 ```{r load-cmap, fig.width=6, fig.height=6}
 ## Read in all the data points
-## outputdir = "~/Dropbox/research/usc/flow-cytometry/data/colocalize"
 filename0 = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
 fullres0 = readRDS(file = filename0) %>% add_column(id = "MGL1704") %>% .[c(),]
 datlist_cmap = sapply(ids_final, function(id){
