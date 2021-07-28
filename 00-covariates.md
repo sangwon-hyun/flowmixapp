@@ -1,33 +1,38 @@
 Obtaining environmental covariates
 ================
-Compiled at 2021-07-23 06:34:55 UTC
+Compiled at 2021-07-23 20:00:30 UTC
 
 ``` r
 knitr::opts_chunk$set(fig.width=14, fig.height=8, echo=TRUE, eval=TRUE, cache=FALSE,
                       warning=FALSE, message=FALSE,
                       cache.lazy = FALSE)
 
-## Setup the cache and file directory
-origCache <- knitr::opts_chunk$get("cache.path")
-base <- sub("_cache/.*$", "", origCache)
-knitr::opts_chunk$set(fig.path = file.path(getwd(), "data", base, 'figures/'))
+## ## Setup the cache and file directory
+## origCache <- knitr::opts_chunk$get("cache.path")
+## base <- sub("_cache/.*$", "", origCache)
+## knitr::opts_chunk$set(fig.path = file.path(getwd(), "data", base, 'figures/'))
 
 ## Load packages
 library(tidyverse)
 library(knitr)
 library(cmap4r)
+library(here)
 
 ## Setup some plotting details
 coul <- colorRampPalette(RColorBrewer::brewer.pal(8, "RdYlBu"))(25)
-## initialize_cmap(cmap_key = "5e05c500-d68d-11e9-9d3b-4f83fcec4710")
-## set_authorization(reset = TRUE, cmap_key = "5e05c500-d68d-11e9-9d3b-4f83fcec4710")
-## source("colocalize-helpers.R")
 source("helpers.R")
 ```
 
 ``` r
-## Common project name
-outputdir = file.path("data", base)
+## ## Common project name
+## outputdir = file.path("data", base)
+## if(!dir.exists(outputdir)) dir.create(outputdir)
+
+
+base = "00-covariates"
+here::i_am("00-covariates.Rmd")
+knitr::opts_chunk$set(fig.path = here::here("data", base, 'figures/'))
+outputdir = here::here("data", base)
 if(!dir.exists(outputdir)) dir.create(outputdir)
 ```
 
@@ -224,7 +229,7 @@ datlist = mclapply(ids_final, function(id){
     return(NULL)
   }
   return(NULL)
-}, mc.cores = lenth(ids_final), mc.preschedule = FALSE)
+}, mc.cores = length(ids_final), mc.preschedule = FALSE)
 ```
 
 ## Clean on-board sunlight (PAR)
@@ -290,7 +295,6 @@ Temperature and salinity data is fixed and interpolated whenever there’s
 a gap shorter than 12 hours.
 
 ``` r
-outputdir = "~/Dropbox/research/usc/flow-cytometry/data/colocalize"
 datlist_sss_sst_hourly = read.csv(file.path(outputdir, "clean_sfl.csv")) %>% as_tibble() %>%
   rename(id = cruise, time = DATE, sss_cruise = SALINITY, sst_cruise = TEMP) %>%
   filter(id %in% ids_final) %>% 
@@ -359,8 +363,6 @@ for(ii in 1:8){
     scale_x_datetime(date_labels = "%b%d\n%Y") +
     theme(strip.text.x = element_text(size = rel(1), face = "bold"))  -> p
   print(p)
-  ## ggsave(file = file.path(outputdir, paste0(id, "-cruise-covariates-", ii, ".png")),
-  ##        width = 16, height = 8)
 }
 ```
 
@@ -378,11 +380,12 @@ for each cruise and variable.
 
 ``` r
 ## Read in all the data points
-## outputdir = "~/Dropbox/research/usc/flow-cytometry/data/colocalize"
-filename0 = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
+## filename0 = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
+filename0 = here::here("data", base, "cmap-data", paste0("MGL1704", "-adaptive", ".RDS"))
 fullres0 = readRDS(file = filename0) %>% add_column(id = "MGL1704") %>% .[c(),]
 datlist_cmap = sapply(ids_final, function(id){
-  filename = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
+  filename = here::here("data", base, "cmap-data", paste0(id, "-adaptive", ".RDS"))
+  ## filename = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
   if(file.exists(filename)){
     fullres = readRDS(file = filename) %>% add_column(id = id)
   } else { return(fullres0) }
@@ -482,13 +485,15 @@ for(id in ids_final){
   ## Unscaled version
   onedat = combined_dat_complete %>% .[[id]] 
   filename = paste0(id, "-covariates-unscaled.RDS")
-  saveRDS(onedat, file = file.path(outputdir, filename))
+  ## saveRDS(onedat, file = file.path(outputdir, filename))
+  saveRDS(onedat, file = here::here("data", base, filename))
 
   ## Scaled version
   onedat_scaled = onedat %>% 
     mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x)))
   filename = paste0(id, "-covariates-scaled.RDS")
-  saveRDS(onedat_scaled, file = file.path(outputdir, filename))
+  ## saveRDS(onedat_scaled, file = file.path(outputdir, filename))
+  saveRDS(onedat, file = here::here("data", base, filename))
 
   ## Plot scaled data
   p = onedat_scaled %>%

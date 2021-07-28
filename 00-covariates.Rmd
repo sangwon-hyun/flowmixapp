@@ -14,27 +14,32 @@ knitr::opts_chunk$set(fig.width=14, fig.height=8, echo=TRUE, eval=TRUE, cache=FA
                       warning=FALSE, message=FALSE,
                       cache.lazy = FALSE)
 
-## Setup the cache and file directory
-origCache <- knitr::opts_chunk$get("cache.path")
-base <- sub("_cache/.*$", "", origCache)
-knitr::opts_chunk$set(fig.path = file.path(getwd(), "data", base, 'figures/'))
+## ## Setup the cache and file directory
+## origCache <- knitr::opts_chunk$get("cache.path")
+## base <- sub("_cache/.*$", "", origCache)
+## knitr::opts_chunk$set(fig.path = file.path(getwd(), "data", base, 'figures/'))
 
 ## Load packages
 library(tidyverse)
 library(knitr)
 library(cmap4r)
+library(here)
 
 ## Setup some plotting details
 coul <- colorRampPalette(RColorBrewer::brewer.pal(8, "RdYlBu"))(25)
-## initialize_cmap(cmap_key = "5e05c500-d68d-11e9-9d3b-4f83fcec4710")
-## set_authorization(reset = TRUE, cmap_key = "5e05c500-d68d-11e9-9d3b-4f83fcec4710")
-## source("colocalize-helpers.R")
 source("helpers.R")
 ```
  
 ```{r directories}
-## Common project name
-outputdir = file.path("data", base)
+## ## Common project name
+## outputdir = file.path("data", base)
+## if(!dir.exists(outputdir)) dir.create(outputdir)
+
+
+base = "00-covariates"
+here::i_am("00-covariates.Rmd")
+knitr::opts_chunk$set(fig.path = here::here("data", base, 'figures/'))
+outputdir = here::here("data", base)
 if(!dir.exists(outputdir)) dir.create(outputdir)
 ```
 
@@ -158,7 +163,7 @@ datlist = mclapply(ids_final, function(id){
     return(NULL)
   }
   return(NULL)
-}, mc.cores = lenth(ids_final), mc.preschedule = FALSE)
+}, mc.cores = length(ids_final), mc.preschedule = FALSE)
 ```
 
 ## Clean on-board sunlight (PAR)
@@ -306,10 +311,12 @@ cruise and variable.
 
 ```{r load-cmap, fig.width=6, fig.height=6}
 ## Read in all the data points
-filename0 = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
+## filename0 = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
+filename0 = here::here("data", base, "cmap-data", paste0("MGL1704", "-adaptive", ".RDS"))
 fullres0 = readRDS(file = filename0) %>% add_column(id = "MGL1704") %>% .[c(),]
 datlist_cmap = sapply(ids_final, function(id){
-  filename = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
+  filename = here::here("data", base, "cmap-data", paste0(id, "-adaptive", ".RDS"))
+  ## filename = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
   if(file.exists(filename)){
     fullres = readRDS(file = filename) %>% add_column(id = id)
   } else { return(fullres0) }
@@ -403,13 +410,15 @@ for(id in ids_final){
   ## Unscaled version
   onedat = combined_dat_complete %>% .[[id]] 
   filename = paste0(id, "-covariates-unscaled.RDS")
-  saveRDS(onedat, file = file.path(outputdir, filename))
+  ## saveRDS(onedat, file = file.path(outputdir, filename))
+  saveRDS(onedat, file = here::here("data", base, filename))
 
   ## Scaled version
   onedat_scaled = onedat %>% 
     mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x)))
   filename = paste0(id, "-covariates-scaled.RDS")
-  saveRDS(onedat_scaled, file = file.path(outputdir, filename))
+  ## saveRDS(onedat_scaled, file = file.path(outputdir, filename))
+  saveRDS(onedat, file = here::here("data", base, filename))
 
   ## Plot scaled data
   p = onedat_scaled %>%
