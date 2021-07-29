@@ -1,6 +1,6 @@
 Obtaining environmental covariates
 ================
-Compiled at 2021-07-23 20:00:30 UTC
+Compiled at 2021-07-29 22:32:04 UTC
 
 ``` r
 knitr::opts_chunk$set(fig.width=14, fig.height=8, echo=TRUE, eval=TRUE, cache=FALSE,
@@ -179,59 +179,6 @@ Our goals are:
 
 # Prepare on-board data
 
-## Download on-board sunlight (PAR)
-
-Colocalize cruises from CMAP using this code (not run now):
-
-``` r
-datlist = mclapply(ids_final, function(id){
-  reslist = lapply(1:nvar, function(ivar){
-    tryCatch({
-
-      varname = vars %>% pull(Variable) %>% .[ivar]
-      tabname = vars %>% pull(Table_Name) %>% .[ivar]
-
-      if(tabname %in% c("tblWOA_Climatology", "tblPisces_NRT", "tblCHL_REP", "tblModis_PAR")){
-        param = list_of_params[[tabname]]
-      } else {
-        param = list_of_params[["other"]]
-      }
-      for(isize in 1:20){
-
-        ## Increase the radius
-        if(isize > 1) param$latTolerance = param$latTolerance + 0.1
-        if(isize > 1) param$lonTolerance = param$lonTolerance + 0.1
-        dt = along_track(id,
-                         targetTables = tabname,
-                         targetVars = varname,
-                         temporalTolerance = param$temporalTolerance,
-                         latTolerance = param$latTolerance,
-                         lonTolerance = param$lonTolerance,
-                         depthTolerance = param$depthTolerance,
-                         depth1 = param$depth1,
-                         depth2 = param$depth2) %>% as_tibble() 
-        dt_small = dt %>% dplyr::select(!contains("_std"))
-        dt_small_missing_prop = dt_small %>% summarize(naprop = mean(is.na(!!sym(varname)))) %>% unlist()
-        print(dt_small_missing_prop)
-        if(dt_small_missing_prop == 0) break
-      }
-      return(dt_small)
-    }, error = function(e){
-      return(NULL)
-    })
-  })
-  lens = reslist %>% purrr::map(. %>% length()) %>% unlist()
-  if(any(lens == 0)){ reslist = reslist[-which(lens == 0)] }
-  if(length(reslist) > 0){
-    fullres = reslist %>% purrr::reduce(full_join, by = c("time", "lon", "lat"))
-    fullres = fullres %>% dplyr::select(!contains("_std"))
-    saveRDS(fullres, file = file.path(outputdir, paste0(id, "-adaptive.RDS")))
-    return(NULL)
-  }
-  return(NULL)
-}, mc.cores = length(ids_final), mc.preschedule = FALSE)
-```
-
 ## Clean on-board sunlight (PAR)
 
 Load PAR data first.
@@ -374,6 +321,60 @@ datlist_combined = datlist_combined_lagged   ##.["KN210-04"] %>%
 
 # Combine with CMAP variables
 
+The CMAP variables can be downloaded using this script (not run now):
+
+``` r
+datlist = mclapply(ids_final, function(id){
+  reslist = lapply(1:nvar, function(ivar){
+    tryCatch({
+
+      varname = vars %>% pull(Variable) %>% .[ivar]
+      tabname = vars %>% pull(Table_Name) %>% .[ivar]
+
+      if(tabname %in% c("tblWOA_Climatology", "tblPisces_NRT", "tblCHL_REP", "tblModis_PAR")){
+        param = list_of_params[[tabname]]
+      } else {
+        param = list_of_params[["other"]]
+      }
+      for(isize in 1:20){
+
+        ## Increase the radius
+        if(isize > 1) param$latTolerance = param$latTolerance + 0.1
+        if(isize > 1) param$lonTolerance = param$lonTolerance + 0.1
+        dt = along_track(id,
+                         targetTables = tabname,
+                         targetVars = varname,
+                         temporalTolerance = param$temporalTolerance,
+                         latTolerance = param$latTolerance,
+                         lonTolerance = param$lonTolerance,
+                         depthTolerance = param$depthTolerance,
+                         depth1 = param$depth1,
+                         depth2 = param$depth2) %>% as_tibble() 
+        dt_small = dt %>% dplyr::select(!contains("_std"))
+        dt_small_missing_prop = dt_small %>% summarize(naprop = mean(is.na(!!sym(varname)))) %>% unlist()
+        print(dt_small_missing_prop)
+        if(dt_small_missing_prop == 0) break
+      }
+      return(dt_small)
+    }, error = function(e){
+      return(NULL)
+    })
+  })
+  lens = reslist %>% purrr::map(. %>% length()) %>% unlist()
+  if(any(lens == 0)){ reslist = reslist[-which(lens == 0)] }
+  if(length(reslist) > 0){
+    fullres = reslist %>% purrr::reduce(full_join, by = c("time", "lon", "lat"))
+    fullres = fullres %>% dplyr::select(!contains("_std"))
+    saveRDS(fullres, file = file.path(outputdir, paste0(id, "-adaptive.RDS")))
+    return(NULL)
+  }
+  return(NULL)
+}, mc.cores = length(ids_final), mc.preschedule = FALSE)
+```
+
+(Assuming the above code has been run, let’s proceed to load and process
+it.)
+
 Running this code produces `datlist`, accessed last in 2021-07-20. We’ll
 save this to a file, and summarize using a heatmap of data availability,
 for each cruise and variable.
@@ -479,6 +480,9 @@ Lastly, scale all variables EXCEPT par, which has already been scaled.
 Then, save to RDS files.
 
 ``` r
+## Temporary
+bigdat = combined_dat_complete %>% data.table::rbindlist(use.names = TRUE, fill = TRUE, idcol=NULL) %>% as_tibble()
+
 for(id in ids_final){
   if(nrow(combined_dat[[id]]) == 0) next
 
@@ -489,6 +493,14 @@ for(id in ids_final){
   saveRDS(onedat, file = here::here("data", base, filename))
 
   ## Scaled version
+  onedat_scaled = onedat %>% 
+    mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x)))
+  filename = paste0(id, "-covariates-scaled.RDS")
+  ## saveRDS(onedat_scaled, file = file.path(outputdir, filename))
+  saveRDS(onedat, file = here::here("data", base, filename))
+
+  ## Common scaled version
+  onedat = combined_dat_complete %>% .[[id]] 
   onedat_scaled = onedat %>% 
     mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x)))
   filename = paste0(id, "-covariates-scaled.RDS")
@@ -508,3 +520,137 @@ for(id in ids_final){
 ```
 
 ![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-1.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-2.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-3.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-4.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-5.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-6.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-7.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-8.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-9.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-10.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-11.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-12.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-13.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-14.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-15.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-16.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-17.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-18.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-19.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-20.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-21.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-22.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-23.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-24.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-25.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-26.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-27.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-28.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-29.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-30.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-31.png)<!-- -->
+
+Some odd things 1. PP seems to shoot up in one or two cruise. 2. Fe also
+shoots up, but to a lesser extent. 3. WOA variables for the same cruise
+as PP’s culprit ()–CHL also shoots up. 4. The first cruise FK180310-1
+has very high values of PHYC, O2, CHL
+
+# Visualize all data together
+
+We visualize each covariate in a separate panel:
+
+``` r
+bigdat = combined_dat_complete %>% data.table::rbindlist(use.names = TRUE, fill = TRUE, idcol=NULL) %>% as_tibble()
+## bigdat = bigdat %>% group_by(id) %>% mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x))) %>% ungroup()
+bigdat_long = bigdat %>% pivot_longer(cols = -one_of(c("time", "lat", "lon", "id")))
+vals = bigdat_long$name %>% unique()
+bigdat_long$time = as.factor(bigdat_long$time)
+chunks = split(1:27, ceiling(seq_along(1:27)/3))
+for(chunk in chunks){
+  bigdat_long %>% filter(name %in% vals[chunk]) %>% 
+    ggplot() +
+    theme_bw() +
+    facet_grid(rows = vars(name), scales = "free_y") +
+    geom_point(aes(x=time, y=value, col = id), cex=.5) +
+    theme(axis.ticks.x = element_blank(),
+          axis.text.x = element_blank()) +
+    guides(colour = guide_legend(nrow = 2)) +
+    theme(legend.position="bottom") -> p
+  ## filename = paste0(vals[chunk] %>% substr(0,3), collapse="-") %>% paste0("-scaled.png")
+  filename = paste0(vals[chunk] %>% substr(0,3), collapse="-") %>% paste0(".png")
+  ggsave(file = here::here("data", base, filename), width = 20, height=10)
+}
+
+## Better (but larger) plots
+bigdat = combined_dat_complete %>% data.table::rbindlist(use.names = TRUE, fill = TRUE, idcol=NULL) %>% as_tibble()
+bigdat_long = bigdat %>% pivot_longer(cols = -one_of(c("time", "lat", "lon", "id")))
+plist = list()
+for(val in vals){
+  print(val)
+  bigdat_long %>% filter(name %in% c(val)) %>% 
+  ggplot() +
+  theme_bw() +
+  facet_grid(.~id, scales = "free",  space='free_x') +
+  geom_line(aes(x=time, y=value), lwd=.5, col=rgb(0,0,0,0.3)) +
+  geom_point(aes(x=time, y=value), cex=.3, col='red') +
+  guides(colour = guide_legend(nrow = 2)) +
+  xlab("") +
+    ylab("") +
+    ggtitle(val) +
+  theme(legend.position="bottom") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(strip.text.x = element_text(size = rel(.5), face="bold")) -> p
+  plist[[val]] = p
+}
+```
+
+    ## [1] "Si"
+    ## [1] "NO3"
+    ## [1] "CHL"
+    ## [1] "PHYC"
+    ## [1] "PO4"
+    ## [1] "O2"
+    ## [1] "AOU_WOA_clim"
+    ## [1] "density_WOA_clim"
+    ## [1] "o2sat_WOA_clim"
+    ## [1] "oxygen_WOA_clim"
+    ## [1] "salinity_WOA_clim"
+    ## [1] "conductivity_WOA_clim"
+    ## [1] "nitrate_WOA_clim"
+    ## [1] "phosphate_WOA_clim"
+    ## [1] "silicate_WOA_clim"
+    ## [1] "sss_cruise"
+    ## [1] "sst_cruise"
+    ## [1] "par"
+    ## [1] "par_3"
+    ## [1] "par_6"
+    ## [1] "par_9"
+    ## [1] "par_12"
+    ## [1] "sst"
+    ## [1] "Fe"
+    ## [1] "PP"
+    ## [1] "vgosa"
+    ## [1] "vgos"
+    ## [1] "sla"
+    ## [1] "ugosa"
+    ## [1] "ugos"
+    ## [1] "sss"
+
+``` r
+## Save these to files
+library(gridExtra)
+chunks = split(1:27, ceiling(seq_along(1:27)/3))
+for(chunk in chunks){
+  print(chunk)
+  pp = do.call("grid.arrange", c(plist[chunk], ncol=1))
+  filename = paste0(vals[chunk] %>% substr(0,3), collapse="-") %>% paste0("-new.png")
+  ggsave(plot = pp, file = here::here("data", base, filename), width = 40, height=20)
+}
+```
+
+    ## [1] 1 2 3
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-1.png)<!-- -->
+
+    ## [1] 4 5 6
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-2.png)<!-- -->
+
+    ## [1] 7 8 9
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-3.png)<!-- -->
+
+    ## [1] 10 11 12
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-4.png)<!-- -->
+
+    ## [1] 13 14 15
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-5.png)<!-- -->
+
+    ## [1] 16 17 18
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-6.png)<!-- -->
+
+    ## [1] 19 20 21
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-7.png)<!-- -->
+
+    ## [1] 22 23 24
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-8.png)<!-- -->
+
+    ## [1] 25 26 27
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-9.png)<!-- -->
