@@ -1,6 +1,6 @@
 Obtaining environmental covariates
 ================
-Compiled at 2021-07-29 22:32:04 UTC
+Compiled at 2021-08-13 16:10:41 UTC
 
 ``` r
 knitr::opts_chunk$set(fig.width=14, fig.height=8, echo=TRUE, eval=TRUE, cache=FALSE,
@@ -20,7 +20,7 @@ library(here)
 
 ## Setup some plotting details
 coul <- colorRampPalette(RColorBrewer::brewer.pal(8, "RdYlBu"))(25)
-source("helpers.R")
+source("00-helpers.R")
 ```
 
 ``` r
@@ -247,18 +247,22 @@ datlist_sss_sst_hourly = read.csv(file.path(outputdir, "clean_sfl.csv")) %>% as_
   filter(id %in% ids_final) %>% 
   mutate(id = as.factor(id)) %>%
   named_group_split(id) %>% purrr::map(.%>% 
-                                       mutate(sss_cruise = as.numeric(scale(sss_cruise)),
-                                              sst_cruise = as.numeric(scale(sst_cruise)), id = id) %>% 
+                                       ## mutate(sss_cruise = as.numeric(scale(sss_cruise)),
+                                       ##        sst_cruise = as.numeric(scale(sst_cruise)), id = id) %>% 
+                                       mutate(sss_cruise = as.numeric(sss_cruise),
+                                              sst_cruise = as.numeric(sst_cruise), id = id) %>% 
                                        mutate(time = lubridate::as_datetime(time)) %>%
                                        arrange(time) %>% 
                                        padr::pad() %>% 
                                        fill(id))
 
-## Manual outlier fix for salinity (NOT sure about this)
-ii = which(datlist_sss_sst_hourly[["FK180310-2"]]$sss_cruise <= -6)
-stopifnot(length(ii) == 1)
-datlist_sss_sst_hourly[["FK180310-2"]]$sss_cruise[ii] = mean(datlist_sss_sst_hourly[["FK180310-2"]]$sss_cruise[ii + ((-3):(-1))], na.rm=TRUE)
-datlist_sss_sst_hourly[["FK180310-2"]]$sss_cruise = scale(datlist_sss_sst_hourly[["FK180310-2"]]$sss_cruise)
+## datlist_sss_sst_hourly %>% bind_rows() %>% ggplot() + facet_wrap(~id, scales = "free_x", nrow = 2) +  geom_point(aes(x=time, y=sss_cruise), cex=.3)
+
+## ## Manual outlier fix for salinity (NOT sure about this)
+## ii = which(datlist_sss_sst_hourly[["FK180310-2"]]$sss_cruise <= -6)
+## stopifnot(length(ii) == 1)
+## datlist_sss_sst_hourly[["FK180310-2"]]$sss_cruise[ii] = mean(datlist_sss_sst_hourly[["FK180310-2"]]$sss_cruise[ii + ((-3):(-1))], na.rm=TRUE)
+## datlist_sss_sst_hourly[["FK180310-2"]]$sss_cruise = scale(datlist_sss_sst_hourly[["FK180310-2"]]$sss_cruise)
 
 ## Fill in sss and sst using spline interpolation
 datlist_sss_sst_hourly_new <-
@@ -280,9 +284,9 @@ Now, we’ll combine all the on-board data.
 datlist_combined = list()
 for(id in ids_final){
   datlist_combined[[id]] = full_join(datlist_sss_sst_hourly_new[[id]], datlist_par_hourly_new[[id]],
-                                     by = c("id", "time")) %>% 
-    mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x))) %>% 
-    mutate_at(vars(par), ~as.numeric(scale(.x, center=FALSE)))
+                                     by = c("id", "time")) 
+    ## mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x))) %>% 
+    ## mutate_at(vars(par), ~as.numeric(scale(.x, center=FALSE)))
 }
 ```
 
@@ -324,6 +328,7 @@ datlist_combined = datlist_combined_lagged   ##.["KN210-04"] %>%
 The CMAP variables can be downloaded using this script (not run now):
 
 ``` r
+source(here::here("data", base, "colocalize-params.R"))
 datlist = mclapply(ids_final, function(id){
   reslist = lapply(1:nvar, function(ivar){
     tryCatch({
@@ -477,180 +482,199 @@ plot_frequency(combined_dat_complete)
 # Save data
 
 Lastly, scale all variables EXCEPT par, which has already been scaled.
+The scaling will be done one variable at a time, by pooling all
+measurements from all cruises and applying a common scaling.
+
 Then, save to RDS files.
 
+## 
+
 ``` r
-## Temporary
-bigdat = combined_dat_complete %>% data.table::rbindlist(use.names = TRUE, fill = TRUE, idcol=NULL) %>% as_tibble()
+## Common scaled version of data
+combined_dat_complete_common_scaled =
+  ## Combine all tables
+  combined_dat_complete %>%
+  ## Scale PAR values to be scaled within each cruise. 
+  purrr::map(. %>% mutate_at(vars(par), ~as.numeric(scale(.x, center=FALSE)))) %>% 
+  bind_rows() %>%
+  ## Perform scaling on the rest of variables
+  mutate_at(vars(-time,-lat, -lon, -id, -contains("par")), ~as.numeric(scale(.x))) %>%
+  ## Split by group again
+  named_group_split(id)
 
 for(id in ids_final){
+  cat('###',id,' \n')
   if(nrow(combined_dat[[id]]) == 0) next
 
-  ## Unscaled version
+  ## Save unscaled version
   onedat = combined_dat_complete %>% .[[id]] 
   filename = paste0(id, "-covariates-unscaled.RDS")
-  ## saveRDS(onedat, file = file.path(outputdir, filename))
   saveRDS(onedat, file = here::here("data", base, filename))
 
-  ## Scaled version
+  ## Save scaled version (scaled within each cruise)
   onedat_scaled = onedat %>% 
     mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x)))
   filename = paste0(id, "-covariates-scaled.RDS")
-  ## saveRDS(onedat_scaled, file = file.path(outputdir, filename))
   saveRDS(onedat, file = here::here("data", base, filename))
 
-  ## Common scaled version
-  onedat = combined_dat_complete %>% .[[id]] 
-  onedat_scaled = onedat %>% 
-    mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x)))
-  filename = paste0(id, "-covariates-scaled.RDS")
-  ## saveRDS(onedat_scaled, file = file.path(outputdir, filename))
-  saveRDS(onedat, file = here::here("data", base, filename))
+  ## Save *Ccmmon* scaled version (scaled across all cruises together)
+  onedat_common_scaled = combined_dat_complete_common_scaled %>% .[[id]]
+  filename = paste0(id, "-covariates-common-scaled.RDS")
+  saveRDS(onedat_common_scaled, file = here::here("data", base, filename))
+
+  ## ## temporary
+  ## ## combined_dat_complete %>%  
+  ## combined_dat_complete_common_scaled %>%  
+  ## ## combined_dat_complete_common_scaled %>%  
+  ##   data.table::rbindlist(fill = TRUE) %>%
+  ##   ggplot() +
+  ##   facet_wrap(~id, scale = "free_x") +
+  ##   geom_point(aes(x=time, y=par), cex=.5) +
+  ##   geom_line(aes(x=time, y=par), lwd = .5, col = rgb(0,0,0,0.2)) 
 
   ## Plot scaled data
-  p = onedat_scaled %>%
+  p = onedat_common_scaled %>%
     pivot_longer(-one_of("time", "lat", "lon", "id"))  %>% 
     ggplot() + facet_wrap(~name, scales = "free_y", ncol=2) +
     geom_line(aes(x=time, y=value), lwd=.8, col=rgb(0,0,0,0.3)) + ##, col=name))
     geom_point(aes(x=time, y=value), cex=.3) +
     ggtitle(id)  
   print(p)
-  ## ggsave(file = paste0(id, "-covariates.png"), width=15, height=10)
+  cat('\n\n')
 }
 ```
 
-![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-1.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-2.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-3.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-4.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-5.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-6.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-7.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-8.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-9.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-10.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-11.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-12.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-13.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-14.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-15.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-16.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-17.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-18.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-19.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-20.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-21.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-22.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-23.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-24.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-25.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-26.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-27.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-28.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-29.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-30.png)<!-- -->![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-31.png)<!-- -->
+### KM1314
 
-Some odd things 1. PP seems to shoot up in one or two cruise. 2. Fe also
-shoots up, but to a lesser extent. 3. WOA variables for the same cruise
-as PP’s culprit ()–CHL also shoots up. 4. The first cruise FK180310-1
-has very high values of PHYC, O2, CHL
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-1.png)<!-- -->
 
-# Visualize all data together
+### KN210-04
 
-We visualize each covariate in a separate panel:
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-2.png)<!-- -->
+
+### KM1427
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-3.png)<!-- -->
+
+### KM1512
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-4.png)<!-- -->
+
+### KM1513
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-5.png)<!-- -->
+
+### KM1510
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-6.png)<!-- -->
+
+### KM1502
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-7.png)<!-- -->
+
+### KM1508
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-8.png)<!-- -->
+
+### KM1518
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-9.png)<!-- -->
+
+### KOK1515
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-10.png)<!-- -->
+
+### KOK1604
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-11.png)<!-- -->
+
+### KOK1606
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-12.png)<!-- -->
+
+### KOK1609
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-13.png)<!-- -->
+
+### KM1602
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-14.png)<!-- -->
+
+### KM1601
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-15.png)<!-- -->
+
+### KOK1608
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-16.png)<!-- -->
+
+### KOK1607
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-17.png)<!-- -->
+
+### KM1712
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-18.png)<!-- -->
+
+### KM1709
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-19.png)<!-- -->
+
+### KM1708
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-20.png)<!-- -->
+
+### MGL1704
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-21.png)<!-- -->
+
+### KM1717
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-22.png)<!-- -->
+
+### KM1713
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-23.png)<!-- -->
+
+### KOK1801
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-24.png)<!-- -->
+
+### KM1805
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-25.png)<!-- -->
+
+### KM1802
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-26.png)<!-- -->
+
+### KOK1806
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-27.png)<!-- -->
+
+### KOK1807
+
+### KOK1804
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-28.png)<!-- -->
+
+### FK180310-1
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-29.png)<!-- -->
+
+### FK180310-2
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-30.png)<!-- -->
+
+### KOK1803
+
+![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/scale-and-save-31.png)<!-- -->
+
+Some (visual) oddities we’ll not deal with right now. 1. PP seems to
+shoot up in one or two cruise. 2. Fe also shoots up at the same point,
+but to a lesser extent. 3. WOA variables for the same cruise as PP – CHL
+also shoots up.
 
 ``` r
-bigdat = combined_dat_complete %>% data.table::rbindlist(use.names = TRUE, fill = TRUE, idcol=NULL) %>% as_tibble()
-## bigdat = bigdat %>% group_by(id) %>% mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x))) %>% ungroup()
-bigdat_long = bigdat %>% pivot_longer(cols = -one_of(c("time", "lat", "lon", "id")))
-vals = bigdat_long$name %>% unique()
-bigdat_long$time = as.factor(bigdat_long$time)
-chunks = split(1:27, ceiling(seq_along(1:27)/3))
-for(chunk in chunks){
-  bigdat_long %>% filter(name %in% vals[chunk]) %>% 
-    ggplot() +
-    theme_bw() +
-    facet_grid(rows = vars(name), scales = "free_y") +
-    geom_point(aes(x=time, y=value, col = id), cex=.5) +
-    theme(axis.ticks.x = element_blank(),
-          axis.text.x = element_blank()) +
-    guides(colour = guide_legend(nrow = 2)) +
-    theme(legend.position="bottom") -> p
-  ## filename = paste0(vals[chunk] %>% substr(0,3), collapse="-") %>% paste0("-scaled.png")
-  filename = paste0(vals[chunk] %>% substr(0,3), collapse="-") %>% paste0(".png")
-  ggsave(file = here::here("data", base, filename), width = 20, height=10)
-}
-
-## Better (but larger) plots
-bigdat = combined_dat_complete %>% data.table::rbindlist(use.names = TRUE, fill = TRUE, idcol=NULL) %>% as_tibble()
-bigdat_long = bigdat %>% pivot_longer(cols = -one_of(c("time", "lat", "lon", "id")))
-plist = list()
-for(val in vals){
-  print(val)
-  bigdat_long %>% filter(name %in% c(val)) %>% 
-  ggplot() +
-  theme_bw() +
-  facet_grid(.~id, scales = "free",  space='free_x') +
-  geom_line(aes(x=time, y=value), lwd=.5, col=rgb(0,0,0,0.3)) +
-  geom_point(aes(x=time, y=value), cex=.3, col='red') +
-  guides(colour = guide_legend(nrow = 2)) +
-  xlab("") +
-    ylab("") +
-    ggtitle(val) +
-  theme(legend.position="bottom") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  theme(strip.text.x = element_text(size = rel(.5), face="bold")) -> p
-  plist[[val]] = p
-}
+knitr::knit_exit()
 ```
-
-    ## [1] "Si"
-    ## [1] "NO3"
-    ## [1] "CHL"
-    ## [1] "PHYC"
-    ## [1] "PO4"
-    ## [1] "O2"
-    ## [1] "AOU_WOA_clim"
-    ## [1] "density_WOA_clim"
-    ## [1] "o2sat_WOA_clim"
-    ## [1] "oxygen_WOA_clim"
-    ## [1] "salinity_WOA_clim"
-    ## [1] "conductivity_WOA_clim"
-    ## [1] "nitrate_WOA_clim"
-    ## [1] "phosphate_WOA_clim"
-    ## [1] "silicate_WOA_clim"
-    ## [1] "sss_cruise"
-    ## [1] "sst_cruise"
-    ## [1] "par"
-    ## [1] "par_3"
-    ## [1] "par_6"
-    ## [1] "par_9"
-    ## [1] "par_12"
-    ## [1] "sst"
-    ## [1] "Fe"
-    ## [1] "PP"
-    ## [1] "vgosa"
-    ## [1] "vgos"
-    ## [1] "sla"
-    ## [1] "ugosa"
-    ## [1] "ugos"
-    ## [1] "sss"
-
-``` r
-## Save these to files
-library(gridExtra)
-chunks = split(1:27, ceiling(seq_along(1:27)/3))
-for(chunk in chunks){
-  print(chunk)
-  pp = do.call("grid.arrange", c(plist[chunk], ncol=1))
-  filename = paste0(vals[chunk] %>% substr(0,3), collapse="-") %>% paste0("-new.png")
-  ggsave(plot = pp, file = here::here("data", base, filename), width = 40, height=20)
-}
-```
-
-    ## [1] 1 2 3
-
-![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-1.png)<!-- -->
-
-    ## [1] 4 5 6
-
-![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-2.png)<!-- -->
-
-    ## [1] 7 8 9
-
-![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-3.png)<!-- -->
-
-    ## [1] 10 11 12
-
-![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-4.png)<!-- -->
-
-    ## [1] 13 14 15
-
-![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-5.png)<!-- -->
-
-    ## [1] 16 17 18
-
-![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-6.png)<!-- -->
-
-    ## [1] 19 20 21
-
-![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-7.png)<!-- -->
-
-    ## [1] 22 23 24
-
-![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-8.png)<!-- -->
-
-    ## [1] 25 26 27
-
-![](/home/sangwonh/repos/flowmixapp/data/00-covariates/figures/unnamed-chunk-3-9.png)<!-- -->
