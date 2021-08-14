@@ -17,13 +17,12 @@ knitr::opts_chunk$set(fig.width=14, fig.height=8, echo=TRUE, eval=TRUE, cache=FA
 ## Load packages
 library(tidyverse)
 library(knitr)
-library(cmap4r)
 library(here)
-
+la("flowmix")
 
 ## Setup some plotting details
+source("01-helpers.R")
 coul <- colorRampPalette(RColorBrewer::brewer.pal(8, "RdYlBu"))(25)
-source("helpers.R")
 ```
  
 ```{r directories}
@@ -31,13 +30,403 @@ source("helpers.R")
 base = "01-cytograms"
 here::i_am("01-cytograms.Rmd")
 knitr::opts_chunk$set(fig.path = here::here("data", base, 'figures/'))
-outputdir = here::here("data", base)
+datadir = outputdir = here::here("data", base)
 if(!dir.exists(outputdir)) dir.create(outputdir)
 ```
 
-<!-- Compared to obtaining environmental covariates (00-cytograms.Rmd), this will be short! -->
+# Clean and bin data
 
-The link of cleaned data is originally from here:
+Here is a script to do the following; summarizing the workflow:
+1. Filter particles from the 3-minute level cytograms (i.e. remove min & max in
+   all three dimensions).
+2. Transform fsc_small to diam (Francois explained how to do this to the binned
+   product, but I think it's cleaner to do the conversion at the particle level,
+   prior to binning).
+3. Combine 3-minute level cytograms into hourly cytograms.
+4. Bin this data to 40 equally sized bins in each axis (diam, pe, chl). Each bin
+  value would be the sum (not the count) of the Qc of the particles in that bin.
+
+
+Here are the cruises I want to deal with first:
+
++ KM1508 (SCOPE 3)
++ KM1512 (SCOPE 5)
++ KM1513 (SCOPE 6)
++ KOK1515 (SCOPE 10)
++ KM1518 (SCOPE 11)
++ KOK1609 (SCOPE 19)
+
+
+Let me start with this cruise:
++ Cruise name: SCOPE_3
++ Cruise ID: KM1508	
++ Project: HOT-272
+
+
+Some tips
++ Combine multiple zip files https://stackoverflow.com/questions/60842075/combine-the-split-zip-files-downloading-from-google-drive
+
+
+# Code for a single cruise
+
+Follow these steps (manual steps for now, but to be streamlined soon!):
+
+1. Upload the `.vct` files (original, particle-level data files) to the server.
+
+```{sh, eval = FALSE}
+## Uploading directory.
+scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_3 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
+scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_5 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
+scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_6 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
+scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_10 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
+scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_11 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
+scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_19 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
+```
+
+2. Use a slurm script `run-bin.slurm` which uses 10 cores (using `mc.cores=10`).
+
+* Alternatively, use 
+* `run KM1508`. 
+* `run KM1512`. 
+* `run KM1513` .
+* `run KOK1515` .
+* `run KM1518`.
+* `run KOK1609`
+using the helper function:
+
+```{sh, eval = FALSE}
+run (){
+    cruise_id=$1
+    sbatch  --export=cruise_id=$cruise_id run-bin.slurm
+    return 0
+}
+```
+
+3. Run the code in `~/scripts/flowmixapp/bin.R`.
+* This uses helpers from `~/scripts/flowmixapp/01-helpers.R`
+
+4. This saves to an RDS file (e.g. `KM1508-y.RDS`), on the server. Download this
+   file from the server to `datadir = "~/repos/flowmixapp/data/01-cytograms/."`,
+   using this script:
+
+```{sh, eval = FALSE}
+for cruise_id in KM1508 KM1512 KM1513 KOK1515 KM1518 KOK1609;
+  do
+    from=sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/$cruise_id/data/$cruise_id-datobj.RDS
+    to=~/repos/flowmixapp/data/01-cytograms/$cruise_id/data/.
+  scp $from $to
+done
+```
+This data is further rescaled so that the diameter is between 0 and 8.
+
+## Make the series of plots
+
+We'll load and plot this data, in several ways. First, 1d plots:
+
+```{r 1d-plots, fig.width = 10, fig.height = 3}
+datadir = "~/repos/flowmixapp/data"##/01-cytograms"
+
+all_cruise_id = c("KM1508", "KM1512", "KOK1515", "KM1518", "KOK1609") ## KM1513 doesn't bin correctly, for now.
+for(cruise_id in all_cruise_id){
+  ## print(cruise_id)
+
+  ## Load the binned 3d data
+  ## cruise_id = "KOK1609" ##"KOK1515" ##"KM1512"
+  filename = paste0(cruise_id, "-datobj.RDS")
+  ybin_obj = readRDS(file = file.path(datadir, "01-cytograms", cruise_id, "data", filename))
+  ylist = ybin_obj$ylist
+  qclist = ybin_obj$biomass_list
+  
+  ##  Check that the data has the same dates as X.
+  filename = paste0(cruise_id, "-covariates-scaled.RDS")
+  X = readRDS(file = here::here("data", "00-covariates", filename))
+  twotimes = tibble(Xtime = X$time, ytime = ylist %>% names() %>% lubridate::as_datetime())
+  stopifnot(all(twotimes$Xtime == twotimes$ytime))
+
+  ## Make 1d cytogram plot
+  y_qc_list = Map(function(y, qc){ as_tibble(y) %>% add_column(qc = qc) }, ylist, qclist)
+  for(dimname in c("diam", "chl", "pe")){
+
+    ## Summarize to 1d binned data
+    y_qc_list_1d = y_qc_list %>% purrr::map(. %>% group_by(!!as.name(dimname)) %>% summarise(qc=sum(qc)))
+    qclist_1d = y_qc_list_1d %>% purrr::map(.%>% dplyr::pull(qc))
+    ylist_1d = y_qc_list_1d %>% purrr::map(.%>% dplyr::pull(!!as.name(dimname)))
+
+    ## Make plots
+    p = bin_plot_1D(ylist_1d, qclist_1d)
+    p = p + ggtitle(paste0(cruise_id, " - ", dimname))
+    p = p + theme_minimal()
+    plot(p)
+
+    ## Save to file as well.
+    filename = paste0(cruise_id, "-1d-", dimname, ".png")
+    ggsave(file = file.path(datadir, "01-cytograms", cruise_id, "viz", filename),
+           width = 10, height = 3, units = "in", dpi = 300, p)
+  }
+}
+```
+
+Next, 2d plots (at select dates):
+
+```{r 2d-plots}
+## Load data
+datadir = "~/repos/flowmixapp/data"
+## cruise_id = "KM1508"##"KOK1515"##"KOK1609"##"KM1512" ##"KOK1515" ##"KM1512"
+for(cruise_id in all_cruise_id){
+  filename = paste0(cruise_id, "-datobj.RDS")
+  ybin_obj = readRDS(file = file.path(datadir, "01-cytograms", cruise_id, "data", filename))
+  ylist = ybin_obj$ylist
+  qclist = ybin_obj$biomass_list
+  dir.create(file.path(datadir, "01-cytograms", cruise_id))
+    
+  ## Create the series of 2d plots
+  TT = length(ylist)
+  coul <- colorRampPalette(RColorBrewer::brewer.pal(8, "RdYlBu"))(25) %>% rev()
+  for(tt in 1:TT){
+    p = plot_2d_threepanels(ylist = ylist, countslist = qclist, tt = tt, colours = coul)
+    if(tt %in% ceiling(TT * c(0.01, 0.1, 0.25, 0.5, 0.75, 1))){
+      plot(p)
+    }
+    filename = paste0(tt, ".png")
+    ggsave(file = file.path(datadir, "01-cytograms", cruise_id, "viz", filename),
+           width = 12, height = 4, units = "in", dpi = 300, p)
+  }
+
+  ## Make into a video
+  setwd(file.path(datadir, "01-cytograms", cruise_id, "viz"))
+  system(paste0("ffmpeg -y -framerate 5 -i %d.png ", cruise_id, "-data.mp4"))
+}
+```
+
+Irregularities to check and remove:
+* KM1512: two, maybe three time points.
+* KOK1515: Oct 14th, and late Oct 13th has odd point
+* KOK1609 & KOK1515: (PROBABLY SOLVED with new binning) large diameter particles
+  are odd; CHL is maxed out. Maybe we can remove the maxed out Chl values, to
+  normalize?
+
+Also:
+* Renormalize the chl and pe values WITHIN a cytogram
+  + Make before-after plots.
+
+
+```{r}
+knitr::knit_exit()
+```
+
+# Reproducible code 
+
+Once more is sorted out, I want to make a small set of functions and a short
+script that processes and bins cruise cytogram data.
+
+Here is a list of all the relevant google drive links
+1. Gridded seaflow data (still under construction)
+  + https://drive.google.com/drive/folders/0ANpbLQEz-TOJUk9PVA
+  + This is a subfolder of the above https://drive.google.com/drive/folders/1z5AdF5epEDVXprJWB3MWS2wDWiDnA2jI
+2. 
+
+Here is some code
+
+```{r}
+## Setup
+repocopy = "/media/sangwonh/Backup Plus/flowmixapp"
+base = "01-cytograms"
+datadir = file.path(repocopy, "data", base)
+cruise_id = "SCOPE_3"
+process_one_cruise(datadir, cruise_id)
+
+##' Processes and saves data files.
+##'
+##' @param datadir Directory where directories such as
+##'   \code{MGL1704/MGL1704_opp} exists.
+##' @param cruise_id ID of cruise (e.g. \code{SCOPE_16} is the cruise ID of the
+##'   cruise named "KOK1606". A little bit confusing but
+##' 
+##' @return No return; just .
+##' 
+process_cytograms_one_cruise <- function(datadir, cruise_id){
+
+  ## Hard code the conversion between cruise name and cruise ID here:
+  conversion_table = rbind(c(cruise = "KOK1606", cruise_id = "SCOPE_16"),
+                           c(cruise = "MGL1704", cruise_id = "MGL1704"),
+                           c(cruise = "MGL1704", cruise_id = "MGL1704"))
+
+  ## Read from the Parquet files
+  dir = file.path(datadir, cruise_id, paste0(cruise_id, "_vct"))
+  
+  ## Sort the files
+  files = list.files(dir) %>% sort() ##%>% print()
+  
+  ## Helper function
+  source("01-helpers.R")
+  
+  ## Read in **particle data**
+  reslist = lapply(1:length(files), function(ii){
+    printprogress(ii, length(files), "particle cytogram being read in.")
+  
+    ## Read and clean (yobj = 3d Coordinate + QC)
+    one_vct_filename = file.path(dir, files[ii])
+    yobj = read_from_one_vct_file(one_vct_filename)
+    return(yobj)
+  })
+  
+  ## Collect dates & cytograms & biomass (QC)
+  dates = reslist %>% purrr::map(.%>% pluck("date") %>% toString()) %>% unlist()
+  ylist = reslist %>% purrr::map(.%>% pluck("tab")  %>% dplyr::
+                                 select(diam = contains("diam"),
+                                        chl = contains("chl"),
+                                        pe = contains("pe")))
+  qclist = reslist %>% purrr::map(. %>% pluck("tab") %>% dplyr::pull("qc"))
+
+  ## Assign dates as names
+  names(ylist) = dates
+  names(qclist) = dates
+
+  ## Also load X data
+
+  ## Get lat & lon information from sf file
+  opp_dir = "SCOPE_3/SCOPE_3_opp"
+  opp_file = "2015-05-22T22-00-00+00-00.1H.opp.parquet"
+  df <- arrow::read_parquet(file.path(repocopy, "data", base, opp_dir, opp_file))
+  ## list.files()
+  ## con <- DBI::dbConnect(RSQLite::SQLite(), ":memory:")
+  ## library(dbplyr, warn.conflicts=FALSE)
+
+  dbfilename = "SCOPE_3.db"
+  sfl <- popcycle::get.sfl.table(file.path(repocopy, "data", base, dbfilename))
+  sfl <-  sfl[-nrow(sfl),]
+  popcycle::get.sfl.table
+  
+  opp = popcycle::get.opp.by.file(opp.dir, opp.file, quantile = 50, vct.dir = vct.dir)
+      opptable = opp[, c("diam_mid", "chl_small", "pe", "Qc_mid")]
+
+
+  ## Save particle level data to a file.
+  X = read_covariates(cruise_id)
+  lat = ?
+  lon = ?
+  check_that_datetimes_are_consistent(ylist, qclist, X, time, lat, lon)
+  datobj = list(ylist = ylist,
+                countslist = NULL,
+                biomass_list = qclist,
+                X = X,
+                ## Meta data to save
+                time = time,
+                lat = lat,
+                lon = lon)
+  filename = paste0(cruise, "-hourly.RDS")
+  saveRDS(datobj, file = file.path(outputdir, filename))
+
+
+  ## Next, on to binning
+
+  ## Make an object that contains the bin "fenceposts"
+  grid = flowmix::make_grid(ylist, 40)
+
+  ## Bin the cytograms
+  ybin_obj = flowmix::bin_many_cytograms(ylist = ylist,
+                                         manual.grid = grid,
+                                         qclist = qclist,
+                                         mc.cores = 4,
+                                         verbose = TRUE)
+  
+  ## Save that result to a file
+  X = read_covariates(cruise_id)
+  check_that_datetimes_are_consistent(ylist, qclist, X, time, lat, lon)
+  datobj = list(ylist = ylist,
+                countslist = NULL,
+                biomass_list = qclist,
+                X = X,
+                ## Meta data to save
+                time = time,
+                lat = lat,
+                lon = lon)
+  filename = paste0(cruise, "-hourly.RDS")
+  saveRDS(datobj, file = file.path(outputdir, filename))
+
+}
+
+
+
+```
+
+Load the cytograms and covariates, and form a "datobj", which bundles everything in a list:
+
+
+
+Now, we bin these cytograms:
+
+```{r}
+## Make an object that contains the bin "fenceposts"
+grid = flowmix::make_grid(ylist, 40)
+
+## Bin the cytograms
+ybin_obj = flowmix::bin_many_cytograms(ylist = ylist,
+                                       manual.grid = grid,
+                                       qclist = qclist,
+                                       mc.cores = 4,
+                                       verbose = TRUE)
+
+
+```
+
+
+
+
+Code to visualize a single particle-level cytogram.
+
+```{r}
+y = ylist[[1]]
+
+## Visualize the **particle-level** cytograms
+y %>% select(diam, chl, qc) %>% ggplot() + geom_point(aes(x=diam, y=chl, cex=qc), col=rgb(0,0,1,0.1))
+
+## Bin all the cytograms
+y %>% select(diam, chl, pe)
+
+grid = make_grid(, 40)
+ybin = bin_one_cytogram(y = y %>% select(diam, chl, pe),
+                        manual.grid = grid,
+                        qc = y %>% pull(qc))
+
+## Visualize the binned cytogrmas.
+la('flowmix')
+grid = make_grid(list(y %>% select(diam, chl, pe)), 40)
+ybin = bin_one_cytogram(y = y %>% select(diam, chl, pe),
+                        manual.grid = grid,
+                        qc = y %>% pull(qc))
+ybin = ybin_obj$ybin
+counts = ybin_obj$counts 
+
+## ## Make 2d version
+## yy_3d = as_tibble(ybin) %>% add_column(qc = counts) 
+## yy_2d = collapse_3d_to_2d(ybin, counts, dims = 1:2) %>% as_tibble() %>% rename(qc = counts)
+
+## Plot the 2d
+lapply(list(1:2, 2:3, c(3,1)), function(dims){
+  nm = colnames(ybin)
+  nm1 = nm[dims[1]]
+  nm2 = nm[dims[2]]
+  collapse_3d_to_2d(ybin, counts, dims = dims) %>% as_tibble() %>% rename(qc = counts) %>%
+    ggplot() + geom_raster(aes(x=!!sym(nm1), y=!!sym(nm2), fill=qc)) + theme_minimal() +
+   scale_fill_gradientn(colours = c("white", "black", "yellow", "red"))
+}) -> plist
+do.call(gridExtra::grid.arrange, c(plist, ncol = 3))
+
+```
+
+Okay, next things that are up
+1. Visualize cytograms (for sanity).
+2. Clean some flowmix package code.
+3. Scale the diameter axis to what I was doing in gradients 1.
+4. Save to RDS file.
+5. Make this a pipeline, repeat with the following cruises.
+
+
+
+# Pre-cleaned and pre-binned data 
+
+The link to cleaned data (by the UW Armbrust lab) is here:
 https://drive.google.com/drive/folders/1nK4cBdbXFDODRrLmqo-GoZS-f_yXeiGF
 
 First, we downloaded the content (as of July 23, 2021) into a folder.
@@ -46,7 +435,7 @@ Then, we visualize some data from the cruise KOK1609.
 
 ```{r, fig.width=15, fig.height=5}
 ## dat = read.csv(here::here("data", base, "SCOPE_19", "SCOPE_19.hourly.csv.gz")) %>% as_tibble()
-dat = read.csv(file.path("data", base, "SCOPE_19", "SCOPE_19.hourly.csv.gz")) %>% as_tibble()
+## dat = read.csv(file.path("data", base, "SCOPE_19", "SCOPE_19.hourly.csv.gz")) %>% as_tibble()
 
 for(itime in c(1,10,20,30)){
 
@@ -91,8 +480,6 @@ stopifnot(nrow(dat_parquet) == nrow(dat))
 I can think of several checks
 
 * Ensure that the dates are exactly the same as the covariate data.
-
-*
 
 # Save to file
 
