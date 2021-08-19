@@ -24,5 +24,5 @@ directory called ~00-covariates~.
 [[http://htmlpreview.github.io/?https://github.com/sangwon-hyun/flowmixapp/blob/main/01-cytograms.html][01-cytograms.html]]
 
 *** Estimate flowmix model
-[[http://htmlpreview.github.io/?https://github.com/sangwon-hyun/flowmixapp/blob/main/02-estimate.html][02-estimate.html]]e
+[[http://htmlpreview.github.io/?https://github.com/sangwon-hyun/flowmixapp/blob/main/02-estimate.html][02-estimate.html]]
 

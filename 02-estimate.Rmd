@@ -219,20 +219,32 @@ Some notes of mine go here.
 
 # Next up
 
+Finalize the pilot:
+
+* Scale-free measure of each (covariate, cluster, cruise) to be compared across
+  cruises. One idea is an ANOVA-type ratio of variance e.g. $var(X^T
+  beta_{salinity, k}) / var(\mu_k)$.
 * Proper usage of random seeds (for experiments to be reproducible).
-* Pilot on stability: 100x repeats of experiments.
+* Calculate stability: 100x repeats of experiments.
 * Common-scaled covariate values (by fixing error in alpha M step).
 * Match and label a few clusters.
 * Summarize (the absolute value of) coefficients across cruises.
-* Clean and run jobs other cruises.
+* Fix the error (in the software) when using covariates scaled the same across
+  all cruises.
+
+Then, once the pilot is at a satisfactory state, do rest of experiments:
+
+* Clean the cytograms from the remaining cruises.
+* Run the jobs on the servers.
+* Produce analyses.
 
 
-# Timeline
+<!-- # Timeline -->
 
-* Rest of this week:
-  + random seeds.
-  + pilot stbility.
-  + fix common-scaled covariate values.
+<!-- * Rest of this week: -->
+<!--   + random seeds. -->
+<!--   + pilot stbility. -->
+<!--   + fix common-scaled covariate values. -->
   
-* Weekend
-  + Analysis
+<!-- * Weekend -->
+<!--   + Analysis -->
