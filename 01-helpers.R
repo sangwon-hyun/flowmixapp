@@ -62,9 +62,10 @@ process_y <- function(y, verbose = FALSE){
   rid.inds = list()
 
   ## Eliminate boundary points one dimension at a time.
-  jjlist = sapply(c("chl", "pe", "diam"), function(myname) grep(myname, names(y), fixed = TRUE))
-  for(jj in jjlist){
-    rid.inds[[jj]] = identify_boundary_points_1d(y[,jj])
+  for(dimname in c("chl", "pe", "diam")){
+    print(dimname)
+    rid.inds[[dimname]] = identify_boundary_points_1d(y1d = y[,dimname, drop=TRUE],
+                                                      qc = y[,"qc", drop=TRUE])
   }
   rid.inds = unique(unlist(rid.inds))
 
@@ -76,21 +77,41 @@ process_y <- function(y, verbose = FALSE){
 }
 
 
-##' Takes a 1-column matrix and identifies the ones that are on the boundaries.
+##' Takes vector and identifies the ones that are (1) exactly on the min, and
+##' (2) near the max.
 ##'
-##' @param y1d 1d matrix.
+##' @param y1d vector of points.
 ##'
 ##' @return Indices of the points on the boundaries.
-identify_boundary_points_1d <- function(y1d){
+identify_boundary_points_1d_no_qc <- function(y1d, shave_prop = 0.005){
   y1d = unlist(y1d)
   rng = max(y1d) - min(y1d)
   rid.min.ind = which(y1d == min(y1d))
   ## rid.max.ind = which(y1d == max(y1d))
-  rid.max.ind = which(y1d > max(y1d) - rng * 0.005 )
+  rid.max.ind = which(y1d > max(y1d) - rng * shave_prop )
   rid.ind = c(rid.min.ind, rid.max.ind)
-  if(length(rid.ind) > 0.1 * length(y1d)){
-    print( length(rid.ind) / length(y1d) )
-    print('were eliminated!')
-  }
   return(unique(rid.ind))
+}
+
+
+##' Removes data from the top until the largest bin (of a 100-bin weighted
+##' histogram) is not too unusual (smaller than mean + 1 std of the other bins).
+##'
+##' @param y1d 1 dimensional particles
+##' @param qc accompanying qc for particles
+##'
+##' @return Indices to remove.
+identify_boundary_points_1d <- function(y1d, qc){
+  for(prop in seq(from=0.001, to=0.05, by = 0.001)){
+    ind_to_delete = identify_boundary_points_1d_no_qc(y1d, prop)
+    y1d_trimmed = y1d[-ind_to_delete]
+    qc_trimmed = qc[-ind_to_delete]
+    res = plotrix::weighted.hist(y1d_trimmed, qc_trimmed, breaks = 100, plot = FALSE)
+    tail_count = res$density[length(res$density)]
+    avg = res$density[-length(res$density)] %>% mean()
+    std = res$density[-length(res$density)] %>% sd()
+    if(tail_count < avg + std) break
+  }
+  print(paste(prop, "deleted!"))
+  return(ind_to_delete)
 }

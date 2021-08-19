@@ -6,7 +6,6 @@ output:
     code_folding: hide
     toc: true
     toc_float: true
-  github_document: default
 ---
 
 ```{r global_options, include=TRUE}
@@ -221,9 +220,9 @@ Now, we'll combine all the on-board data.
 datlist_combined = list()
 for(id in ids_final){
   datlist_combined[[id]] = full_join(datlist_sss_sst_hourly_new[[id]], datlist_par_hourly_new[[id]],
-                                     by = c("id", "time")) 
-    ## mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x))) %>% 
-    ## mutate_at(vars(par), ~as.numeric(scale(.x, center=FALSE)))
+                                     by = c("id", "time"))  %>% 
+    ## mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x))) %>%  ## Not doing this because this scaling is done later.
+    mutate_at(vars(par), ~as.numeric(scale(.x, center=FALSE)))
 }
 ```
 
@@ -237,6 +236,8 @@ Here are the finalized on-board covariates:
 
 ```{r plot-cruise-dat, fig.width=10, fig.height=5}
 ## Make a plot of all data
+## sst_range = datlist_combined_lagged %>% purrr::map(. %>% pull(sst_cruise) %>% range()) %>% unlist() %>% range()
+## sss_range = datlist_combined_lagged %>% purrr::map(. %>% pull(sss_cruise) %>% range()) %>% unlist() %>% range()
 for(ii in 1:8){
   datlist_combined_lagged %>% .[4*(ii-1)+(1:4)] %>% ## .["MGL1704"] %>% ##.["KN210-04"] %>%
     bind_rows() %>% 
@@ -245,7 +246,7 @@ for(ii in 1:8){
     pivot_longer(cols = c("par", "sss_cruise", "sst_cruise")) %>%
     ## pivot_longer(cols = c(contains("par"), "sss_cruise", "sst_cruise")) %>%
     ggplot() + 
-    facet_wrap(~id, scales = "free", ncol = 2) +
+    facet_grid(name~id, scales = "free") + ##, ncol = 2) +
     geom_point(aes(x = time, y = value, col = name), cex=.5) +
     geom_line(aes(x = time, y = value, col = name)) +
     scale_x_datetime(date_labels = "%b%d\n%Y") +
@@ -384,8 +385,8 @@ list(combined_dat%>% .[[id]] %>% add_column(type = "incomplete"),
   pivot_longer(cols = -one_of(c("time", "lat", "lon", "type"))) %>%
   ggplot() + facet_wrap(~name, scales = "free_y", ncol=2) +
   geom_line(aes(x=time, y=value), . %>% filter(type=="complete"), col = rgb(0,0,0,0.3))+
-  geom_point(aes(x=time, y=value), . %>% filter(type=="complete"), col='green', cex=.5) +
-  geom_point(aes(x=time, y=value), . %>% filter(type=="incomplete"),cex=.5) +
+  geom_point(aes(x=time, y=value), . %>% filter(type=="complete"), col='green', cex=.2) +
+  geom_point(aes(x=time, y=value), . %>% filter(type=="incomplete"),cex=.2) +
   scale_x_datetime(breaks = scales::date_breaks("1 day"), date_labels = "%b %d %Y")  +
   theme(axis.text.x = element_text(angle = 90)) -> p
 print(p)
@@ -407,28 +408,29 @@ plot_frequency(combined_dat_complete)
 
 # Save data
 
-Lastly, scale all variables EXCEPT par, which has already been scaled. The
-scaling will be done one variable at a time, by pooling all measurements from
-all cruises and applying a common scaling.
+Lastly, scale all variables EXCEPT par, which has already been scaled. 
+
+The scaling will be done one variable at a time, by pooling all measurements
+from all cruises and applying a common scaling.
 
 Then, save to RDS files.
 
 ## {.tabset}
 
 ```{r scale-and-save, results='asis', fig.width=10, fig.height=20}
-
-## Common scaled version of data
+## Create common scaled version of data
 combined_dat_complete_common_scaled =
   ## Combine all tables
   combined_dat_complete %>%
-  ## Scale PAR values to be scaled within each cruise. 
-  purrr::map(. %>% mutate_at(vars(par), ~as.numeric(scale(.x, center=FALSE)))) %>% 
+  ## ## Scale PAR values to be scaled within each cruise. 
+  ## purrr::map(. %>% mutate_at(vars(contains("par")), ~as.numeric(scale(.x, center=FALSE)))) %>% 
   bind_rows() %>%
   ## Perform scaling on the rest of variables
   mutate_at(vars(-time,-lat, -lon, -id, -contains("par")), ~as.numeric(scale(.x))) %>%
   ## Split by group again
   named_group_split(id)
 
+## Save three versions of the covariates data.
 for(id in ids_final){
   cat('###',id,' \n')
   if(nrow(combined_dat[[id]]) == 0) next
@@ -442,9 +444,16 @@ for(id in ids_final){
   onedat_scaled = onedat %>% 
     mutate_at(vars(-time, -id, -contains("par")), ~as.numeric(scale(.x)))
   filename = paste0(id, "-covariates-scaled.RDS")
-  saveRDS(onedat, file = here::here("data", base, "cleaned", filename))
+  saveRDS(onedat_scaled, file = here::here("data", base, "cleaned", filename))
 
-  ## Save *Ccmmon* scaled version (scaled across all cruises together)
+  ## ## Temporary
+  ## onedat_scaled  %>% select(-id, -lat, -lon) %>% 
+  ## pivot_longer(-one_of("time")) %>%
+  ## ggplot() + 
+  ## facet_wrap(~name) +##, scale = "free_y") + 
+  ## geom_line(aes(x=time, y=value))
+
+  ## Save *Common* scaled version (scaled across all cruises together)
   onedat_common_scaled = combined_dat_complete_common_scaled %>% .[[id]]
   filename = paste0(id, "-covariates-common-scaled.RDS")
   saveRDS(onedat_common_scaled, file = here::here("data", base, "cleaned", filename))
@@ -523,5 +532,7 @@ for(chunk in chunks){
 
 
 ```{sh}
-scp -r ~/repos/flowmixapp/data/00-covariates/*-covariates-common-scaled.RDS sangwonh@discovery.usc.edu:~/repos/flowmixapp/data/00-covariates/.
+from=~/repos/flowmixapp/data/00-covariates/cleaned/*-covariates-scaled.RDS
+to=sangwonh@discovery.usc.edu:repos/flowmixapp/data/00-covariates/cleaned/.
+scp -r $from $to
 ```

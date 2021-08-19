@@ -6,10 +6,9 @@ output:
     code_folding: hide
     toc: true
     toc_float: true
-  github_document: default
 ---
 
-```{r global_options, include=TRUE}
+```{r global_options, include=FALSE}
 knitr::opts_chunk$set(fig.width=14, fig.height=8, echo=TRUE, eval=TRUE, cache=FALSE,
                       warning=FALSE, message=FALSE,
                       cache.lazy = FALSE)
@@ -63,9 +62,9 @@ Let me start with this cruise:
 + Project: HOT-272
 
 
-Some tips
+One useful tip (since google drive files are downloaded in separate zip files
+whenever they're larger than about 1Gb):
 + Combine multiple zip files https://stackoverflow.com/questions/60842075/combine-the-split-zip-files-downloading-from-google-drive
-
 
 # Code for a single cruise
 
@@ -75,16 +74,18 @@ Follow these steps (manual steps for now, but to be streamlined soon!):
 
 ```{sh, eval = FALSE}
 ## Uploading directory.
-scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_3 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
-scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_5 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
-scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_6 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
-scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_10 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
-scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_11 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
-scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_19 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/.
+scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_3 sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/KM1508/orig/.
+for cruisename in SCOPE_3 SCOPE_5 SCOPE_6 SCOPE_10 SCOPE_11 SCOPE_19;
+do
+  ## Figure out how to convert between $cruisename and $cruise_id
+  from=/media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/$cruisename
+  to=sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/$cruise_id/orig/.
+  scp $from $to
+done
 ```
 
 2. Use a slurm script `run-bin.slurm` which uses 10 cores (using `mc.cores=10`).
-
+ 
 * Alternatively, use 
 * `run KM1508`. 
 * `run KM1512`. 
@@ -92,6 +93,7 @@ scp -r /media/sangwonh/Backup\ Plus/flowmixapp/data/01-cytograms/SCOPE_19 sangwo
 * `run KOK1515` .
 * `run KM1518`.
 * `run KOK1609`
+
 using the helper function:
 
 ```{sh, eval = FALSE}
@@ -102,46 +104,102 @@ run (){
 }
 ```
 
-3. Run the code in `~/scripts/flowmixapp/bin.R`.
-* This uses helpers from `~/scripts/flowmixapp/01-helpers.R`
-
-4. This saves to an RDS file (e.g. `KM1508-y.RDS`), on the server. Download this
-   file from the server to `datadir = "~/repos/flowmixapp/data/01-cytograms/."`,
-   using this script:
+and the binning script `~/scripts/flowmixapp/run-bin.slurm`:
 
 ```{sh, eval = FALSE}
+#!/bin/bash
+#SBATCH --ntasks=1
+#SBATCH --nodes=1
+#SBATCH --mem-per-cpu=10gb
+#SBATCH --cpus-per-task=6
+#SBATCH --time=1-00:00:00
+#SBATCH --export=none  # Ensures job gets a fresh login environment
+#SBATCH --mail-user=robohyun66@gmail.com
+#SBATCH --mail-type=ALL
+#SBATCH --job-name=bin
+#SBATCH --output=./logs/%A_%a.log
+#SBATCH --error=./logs/%A_%a.err
+
+# Set the session up to use R
+module load gcc/8.3.0
+module load openblas/0.3.8
+module load r/3.6.3
+
+Rscript bin.R \
+	mc.cores=6\
+	cruise_id=$cruise_id\
+
+exit
+
+```
+
+which in turn calls the script `~/scripts/flowmixapp/bin.R`:
+
+```{r, eval = FALSE}
+## TODO: copy this script into here.
+```
+
+This uses helpers from `~/scripts/flowmixapp/01-helpers.R`. Note, this cytogram
+data is rescaled so that the diameter is between 0 and 8.
+
+
+3. The previous step saves the cytograms (along with the covariates `X`, and
+   other things like `lat`, `lon`, and `time`) to an RDS file
+   (e.g. `KM1508-datobj.RDS`), on the server. Download this file from the server
+   to `~/repos/flowmixapp/data/01-cytograms/KM1508/data/.`, using this script:
+
+```{sh, eval = FALSE}
+# KM1513 
 for cruise_id in KM1508 KM1512 KM1513 KOK1515 KM1518 KOK1609;
+for cruise_id in KM1513;
   do
     from=sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/$cruise_id/data/$cruise_id-datobj.RDS
     to=~/repos/flowmixapp/data/01-cytograms/$cruise_id/data/.
   scp $from $to
 done
 ```
-This data is further rescaled so that the diameter is between 0 and 8.
 
 ## Make the series of plots
 
-We'll load and plot this data, in several ways. First, 1d plots:
+We'll load and plot this cytogram data, in several ways. First, 1d plots:
 
 ```{r 1d-plots, fig.width = 10, fig.height = 3}
-datadir = "~/repos/flowmixapp/data"##/01-cytograms"
+all_cruise_id = c("KM1508", "KM1512", "KM1513", "KOK1515", "KM1518", "KOK1609") ## KM1513 doesn't bin correctly, for now.
 
-all_cruise_id = c("KM1508", "KM1512", "KOK1515", "KM1518", "KOK1609") ## KM1513 doesn't bin correctly, for now.
-for(cruise_id in all_cruise_id){
-  ## print(cruise_id)
+for(cruise_id in all_cruise_id){ 
+  print(cruise_id)
 
   ## Load the binned 3d data
-  ## cruise_id = "KOK1609" ##"KOK1515" ##"KM1512"
   filename = paste0(cruise_id, "-datobj.RDS")
-  ybin_obj = readRDS(file = file.path(datadir, "01-cytograms", cruise_id, "data", filename))
+  ybin_obj = readRDS(file = file.path(datadir, cruise_id, "data", filename))
   ylist = ybin_obj$ylist
   qclist = ybin_obj$biomass_list
   
-  ##  Check that the data has the same dates as X.
-  filename = paste0(cruise_id, "-covariates-scaled.RDS")
-  X = readRDS(file = here::here("data", "00-covariates", filename))
-  twotimes = tibble(Xtime = X$time, ytime = ylist %>% names() %>% lubridate::as_datetime())
-  stopifnot(all(twotimes$Xtime == twotimes$ytime))
+  ## Make plots of total QC at each time point
+  qc_over_time = qclist %>% lapply(sum) %>% unlist()
+  p = tibble(time = names(ylist) %>% lubridate::as_datetime(),
+         qcsum = as.numeric(qc_over_time)) %>%
+    ggplot() +
+    geom_line(aes(x = time, y = qcsum), col = rgb(0,0,0,0.2)) +
+    geom_point(aes(x = time, y = qcsum), cex = .5) +
+    ylab("Sum of QC over time") +
+    ggtitle(cruise_id) +
+    scale_x_datetime(date_breaks = "6 hour", labels = scales::date_format("%b %d - %H:%M")) 
+  p = p + theme(axis.text.x = element_text(angle = 25, vjust = 1.0, hjust = 1.0))
+  p = p + theme(legend.position="none")
+  plot(p)
+
+  ## Make lat/lon plots
+  X = ybin_obj$X
+  p = X %>% select(time, lat, lon) %>% 
+    pivot_longer(-one_of("time")) %>%
+    ggplot() + 
+    facet_wrap(~name, scale="free_y", ncol=1) +
+    geom_line(aes(x=time, y=value)) +
+    scale_x_datetime(date_breaks = "6 hour", labels = scales::date_format("%b %d - %H:%M")) 
+  p = p + theme(axis.text.x = element_text(angle = 25, vjust = 1.0, hjust = 1.0))
+  p = p + theme(legend.position="none")
+  plot(p)
 
   ## Make 1d cytogram plot
   y_qc_list = Map(function(y, qc){ as_tibble(y) %>% add_column(qc = qc) }, ylist, qclist)
@@ -152,26 +210,50 @@ for(cruise_id in all_cruise_id){
     qclist_1d = y_qc_list_1d %>% purrr::map(.%>% dplyr::pull(qc))
     ylist_1d = y_qc_list_1d %>% purrr::map(.%>% dplyr::pull(!!as.name(dimname)))
 
-    ## Make plots
-    p = bin_plot_1D(ylist_1d, qclist_1d)
-    p = p + ggtitle(paste0(cruise_id, " - ", dimname))
-    p = p + theme_minimal()
-    plot(p)
+    ## Scaling or not?
+    for(scale_at_each_time in c(FALSE, TRUE)){
+      if(scale_at_each_time) qclist_1d = qclist_1d %>% lapply(function(qc) qc/sum(qc))
 
-    ## Save to file as well.
-    filename = paste0(cruise_id, "-1d-", dimname, ".png")
-    ggsave(file = file.path(datadir, "01-cytograms", cruise_id, "viz", filename),
-           width = 10, height = 3, units = "in", dpi = 300, p)
+      ## Make plots
+      mytitle = paste0(cruise_id, " - ", dimname)
+      if(scale_at_each_time) mytitle = paste0(mytitle, ", density at each time")
+      p = bin_plot_1D(ylist_1d, qclist_1d)
+      p = p + ggtitle(mytitle)
+      p = p + theme_minimal()
+      p = p + scale_x_datetime(date_breaks = "6 hour", labels = scales::date_format("%b %d - %H:%M")) 
+      p = p + theme(axis.text.x = element_text(angle = 25, vjust = 1.0, hjust = 1.0))
+      p = p + theme(legend.position="none")
+      plot(p)
+
+      ## Temporary
+      ## X %>% select(-id, -lat, -lon) %>% 
+      ##   pivot_longer(-one_of("time")) %>%
+      ##   ggplot() + 
+      ##   facet_wrap(~name) + ##, scale = "free_y") + 
+      ##   geom_line(aes(x=time, y=value))
+
+      ## Save to file as well.
+      filename = paste0(cruise_id, "-1d-", dimname, ".png")
+      if(scale_at_each_time) filename = paste0(cruise_id, "-1d-", dimname, "-density.png")
+      ggsave(file = file.path(datadir, cruise_id, "viz", filename),
+             width = 10, height = 3, units = "in", dpi = 300, p)
+    }
   }
 }
 ```
+
+```{r}
+knitr::knit_exit()
+```
+(Stopping here for now..)
+
 
 Next, 2d plots (at select dates):
 
 ```{r 2d-plots}
 ## Load data
 datadir = "~/repos/flowmixapp/data"
-## cruise_id = "KM1508"##"KOK1515"##"KOK1609"##"KM1512" ##"KOK1515" ##"KM1512"
+cruise_id = "KM1513"##"KOK1515"##"KOK1609"##"KM1512" ##"KOK1515" ##"KM1512"
 for(cruise_id in all_cruise_id){
   filename = paste0(cruise_id, "-datobj.RDS")
   ybin_obj = readRDS(file = file.path(datadir, "01-cytograms", cruise_id, "data", filename))
@@ -204,6 +286,8 @@ Irregularities to check and remove:
 * KOK1609 & KOK1515: (PROBABLY SOLVED with new binning) large diameter particles
   are odd; CHL is maxed out. Maybe we can remove the maxed out Chl values, to
   normalize?
+
+Remove some irregularities:
 
 Also:
 * Renormalize the chl and pe values WITHIN a cytogram
@@ -433,7 +517,7 @@ First, we downloaded the content (as of July 23, 2021) into a folder.
 
 Then, we visualize some data from the cruise KOK1609.
 
-```{r, fig.width=15, fig.height=5}
+```{r, fig.width=15, fig.height=6}
 ## dat = read.csv(here::here("data", base, "SCOPE_19", "SCOPE_19.hourly.csv.gz")) %>% as_tibble()
 ## dat = read.csv(file.path("data", base, "SCOPE_19", "SCOPE_19.hourly.csv.gz")) %>% as_tibble()
 

@@ -1,0 +1,238 @@
+---
+title: Model estimates in multiple cruises.
+date: "Compiled at `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'UTC')` UTC"
+output: 
+  html_document:
+    code_folding: show
+---
+
+```{r global_options, include=TRUE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(fig.width=14, fig.height=8, echo=TRUE, eval=TRUE, cache=FALSE,
+                      warning=FALSE, message=FALSE,
+                      cache.lazy = FALSE)
+
+## Load packages
+library(tidyverse)
+library(knitr)
+library(cmap4r)
+library(here)
+library(ggplot2)
+la('flowmix')
+
+
+## Setup some plotting details
+coul <- colorRampPalette(RColorBrewer::brewer.pal(8, "RdYlBu"))(25)
+source("02-helpers.R")
+
+## Some extra stuff ## From: https://github.com/haozhu233/kableExtra/issues/265
+options(kableExtra.auto_format = F)
+```
+ 
+```{r directories}
+## Setup locations
+base = "02-estimate"
+here::i_am("02-estimate.Rmd")
+knitr::opts_chunk$set(fig.path = here::here("data", base, 'figures/'))
+outputdir = here::here("data", base)
+outputdir_cytograms = here::here("data", "01-cytograms")
+if(!dir.exists(outputdir)) dir.create(outputdir)
+```
+
+# Experiment settings
+
+* Number of clusters: default to 10.
+* Size of time blocks: blocks of 5 hours? 
+  + Block 1 is: 1,...,5 
+  + Block 2 is 6,..., 10. And so forth.
+  + Then, CV is done by using blocks {1, 6, 11, ..} as fold 1, {2, 7, 12, ..} as
+    fold 2.
+* Ball constraint: 0.5 or 1? Let's start with 1 (for flexibility). Seems to work
+  well.
+
+# Pilot notes
+
+* For KM1508, one iteration costs 2 or 2.5 seconds per iteration.
+* On 500 cores (used to be 1000), entire CV can be done in 15-30 minutes.
+
+# Download model results
+
+ONLY download the `summary.RDS` file.
+
+```{sh, eval = FALSE}
+##KOK1609
+## KM1513 
+## KM1508
+				 # in KM1512 KOK1515 KM1518;
+for cruise_id in KM1513;
+do
+  from=sangwonh@discovery.usc.edu:repos/flowmixapp/data/02-estimate/$cruise_id/output/numclust-10/summary.RDS
+  to=/home/sangwonh/repos/flowmixapp/data/02-estimate/$cruise_id/output/numclust-10/.
+  mkdir -p  $to
+  rsync -auv $from $to
+done
+
+#   do
+#     from=sangwonh@discovery.usc.edu:repos/flowmixapp/data/01-cytograms/$cruise_id/data/$cruise_id-datobj.RDS
+#     to=~/repos/flowmixapp/data/01-cytograms/$cruise_id/data/.
+#   scp $from $to
+# done
+```
+
+## Results {.tabset}
+
+Make videos of model, and plots \& tables of coefficients.
+
+```{r, load-data, results = 'asis', fig.width=10, fig.height=5}
+numclust = 10
+all_cruise_id = c("KM1508", "KM1512", "KM1513", "KOK1515", "KM1518")##, "KM1513", "KM1518")##, "KOK1609")
+
+## Loop over all cruise IDs
+for(cruise_id in all_cruise_id){
+  cat('### Model', cruise_id,' \n')
+
+  ## Load summary and data
+  destin = file.path(outputdir, cruise_id, "output", paste0("numclust-", numclust))
+  bestres = readRDS(file.path(destin, "summary.RDS"))$bestres
+  
+  ## Load cytogram data.
+  filename = paste0(cruise_id, "-datobj.RDS")
+  ybin_obj = readRDS(file = file.path(outputdir_cytograms, cruise_id, "data", filename))
+  ylist = ybin_obj$ylist
+  countslist = ybin_obj$biomass_list
+  
+  ## Create individual frames
+  dir.create(file.path(file.path(outputdir, cruise_id, "viz")))
+  TT = length(ylist)
+  for(tt in 1:TT){
+    filename = paste0("labeled-", tt, ".png")
+    plotfile = file.path(file.path(outputdir, cruise_id, "viz"), filename)
+    if(file.exists(plotfile)) next
+    g = plot_2d_threepanels(bestres, ylist, countslist, tt = tt, labels = NULL) 
+    ggsave(file = plotfile,
+           width = 12, height = 4,
+           units = "in", dpi = 300, g)
+  }
+
+  ## Make video
+  videofile = file.path(outputdir, cruise_id, "viz", "3d-model.mp4")
+  if(!file.exists(videofile)){
+    cmd_change_directory <- paste0("cd ", file.path(file.path(outputdir, cruise_id, "viz")))
+    cmd_make_movie <- "ffmpeg -y -framerate 5 -i labeled-%d.png  3d-model.mp4"
+    system(paste0(cmd_change_directory, "; ", cmd_make_movie))
+  }
+
+  times = names(ylist)
+  plot_prob_ggplot(bestres, times) %>% print()
+  
+  ## Embed video
+  cat(paste0('<video width="1280" height="720" controls>  <source src="',
+             videofile,
+             '" type="video/mp4"> </video>'))
+  cat('\n\n')
+}
+```
+
+
+Also, show the coefficients in the same style of gradients 1
+
+```{r, fig.width=12, fig.height=12, results='asis'}
+for(cruise_id in all_cruise_id){
+  cat('### Tables', cruise_id,' \n')
+
+  ## Load summary 
+  destin = file.path(outputdir, cruise_id, "output", paste0("numclust-", numclust))
+  bestres = readRDS(file.path(destin, "summary.RDS"))$bestres
+
+  ## Load data
+  filename = paste0(cruise_id, "-datobj.RDS")
+  ybin_obj = readRDS(file = file.path(outputdir_cytograms, cruise_id, "data", filename))
+  ylist = ybin_obj$ylist
+  countslist = ybin_obj$biomass_list
+  
+  ## Plot and print alpha coefficients
+  p = print_alpha(bestres, type = "plot")
+  print(p)
+  tab = print_alpha(bestres, type = "table") ##%>% print()
+  print(tab)
+ 
+  ## Plot and print beta coefficients
+  cytogram_dimnames = ylist[[1]] %>% colnames()
+  p = plot_beta(bestres, cytogram_dimnames)
+  print(p)
+  print_beta(bestres, cytogram_dimnames) %>% print()
+
+  cat('\n\n')
+}
+```
+
+
+
+
+# Notes
+
+Some notes of mine go here.
+
+**Common observations**
+
+* Persistent: two populations near prochloro's chl and diam, but one usually has
+  no chl, and the pro has some chl.
+* Two picoeuks that are separate.
+* Synecho is nonexistent everywhere.
+
+**KM1513**
+
+* **Picoeuk(2&4)** Cluster 2 and 4 are separate picoeuk populations. Similar
+  diameter, but 4 has lots of *pe*, while *2* have very little *pe*; both have
+  *diam* and *pe* that oscillate with diel cycle, *together*.
+* Continuing with 2 and 4; both seem to have a similar amount of Chl, but 4's
+  *chl* oscillates much more than 2's *chl*.
+* **Prochloro(6)** *10* and *6* seem to be separate populations; 6 is probably
+  prochloro with lots of diel movement of diameter, while 10 doesn't. 6 has some
+  *chl* (more than 10) while 10 has very small *chl*. Let's call 10 the "other".
+
+
+**KOK1515**
+
+* **Prochloro(10)** diel movement, and separate from 4.
+* **Picoeuk(9&3)** 9 and 3 are the same as 2 and 4 from KM1513! Exciting -- look
+  more carefully!
+
+**KM1518**
+
+* **Picoeuk(7&2)** same as 2&4 from KM1513.
+* **Prochloro(10)** and a separate "other" 9.
+
+**KM1512**
+
+* **Picoeuk(3&1 and maybe 5)** It seems like 3&1 are 2&4 from KM1513 but 1
+  captures a wider range in chl than in other cruises (there is less data here
+  than in other cruises). We might try using even more clusters to narrow this down.
+* **Prochloro(7&9)** 7&9 is prochloro, 10 is "other" (with no chl).
+
+**KM1508**
+
+* **Picoeuk(1&3 and maybe 4)** are same as 2&4. Cluster 2 has Strong diel
+  moevement with diam and some pe as well. 3 has much smaller chl than in other
+  cruises.
+* **Prochloro(8&9)** CLEAR separation!
+
+
+# Next up
+
+* Proper usage of random seeds (for experiments to be reproducible).
+* Pilot on stability: 100x repeats of experiments.
+* Common-scaled covariate values (by fixing error in alpha M step).
+* Match and label a few clusters.
+* Summarize (the absolute value of) coefficients across cruises.
+* Clean and run jobs other cruises.
+
+
+# Timeline
+
+* Rest of this week:
+  + random seeds.
+  + pilot stbility.
+  + fix common-scaled covariate values.
+  
+* Weekend
+  + Analysis
