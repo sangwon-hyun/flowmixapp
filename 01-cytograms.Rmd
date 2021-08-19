@@ -159,15 +159,17 @@ for cruise_id in KM1513;
 done
 ```
 
-## Make the series of plots
+# Make plots
 
-We'll load and plot this cytogram data, in several ways. First, 1d plots:
+We'll load and plot this cytogram data, in several ways. First, produce 1d plots:
 
-```{r 1d-plots, fig.width = 10, fig.height = 3}
+## {.tabset}
+
+```{r 1d-plots, fig.width = 10, fig.height = 3, results='asis'}
 all_cruise_id = c("KM1508", "KM1512", "KM1513", "KOK1515", "KM1518", "KOK1609") ## KM1513 doesn't bin correctly, for now.
 
 for(cruise_id in all_cruise_id){ 
-  print(cruise_id)
+  cat("### ", cruise_id, "\n")
 
   ## Load the binned 3d data
   filename = paste0(cruise_id, "-datobj.RDS")
@@ -239,6 +241,7 @@ for(cruise_id in all_cruise_id){
              width = 10, height = 3, units = "in", dpi = 300, p)
     }
   }
+  cat("\n\n")
 }
 ```
 
