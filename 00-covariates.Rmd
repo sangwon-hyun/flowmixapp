@@ -8,7 +8,7 @@ output:
     toc_float: true
 ---
 
-```{r global_options, include=TRUE}
+```{r global_options, include=TRUE, message = FALSE, results='hide',warning=FALSE}
 knitr::opts_chunk$set(fig.width=14, fig.height=8, echo=TRUE, eval=TRUE, cache=FALSE,
                       warning=FALSE, message=FALSE,
                       cache.lazy = FALSE)
@@ -34,7 +34,6 @@ source("00-helpers.R")
 ## outputdir = file.path("data", base)
 ## if(!dir.exists(outputdir)) dir.create(outputdir)
 
-
 base = "00-covariates"
 here::i_am("00-covariates.Rmd")
 knitr::opts_chunk$set(fig.path = here::here("data", base, 'figures/'))
@@ -55,30 +54,49 @@ Out of these cruises, we choose:
 
 Based on these criteria, we isolate our attention to **32** cruises between 2013
 and 2018 -- the ones between the following two cruises (excluding the cruises
-for which PAR, salinity and temperature are too sparse to use):
+for which PAR, salinity and temperature are too sparse to use).
 
-* TN291 (2013, January), and
-* KOK1803 (HOT302, 2018	May)
+Out of the 32, we'll be able to use **24** cruises fully -- 8 cruises have
+some missing data from covariates.
 
+Some other notes:
+* KM1510 has too noisy and little cytogram data.
+* Anything before May 2015 (KM1502, KM1427, KM1314, KN210-04) don't have
+  salinity data, so unusuable.
+* Pilot was 5 cruises KM1508 through KM1518
+* Round 1 was KM1601 through KOK1609 (7 cruises)
+* Round 2 will be (3 cruises) MGL1704 KM1708 KM1709.
+* Round 3 will be (3 cruise) KM1712 KM1713 KM1717.
+* Round 4 will be (3 cruises) KM1802 KM1805 FK180310-1.
+* Round 5 will be (3 cruises) FK180310-1 KOK1801 KOK1803.
+
+<!-- * TN291 (2013, January), and -->
+<!-- * KOK1803 (HOT302, 2018	May) -->
 
 ```{r results = 'asis'}
 ## Load all the seaflow cruise IDs
 meta_data = read.csv(file.path(outputdir, "seaflow-instrument-log-metadata.csv")) %>%
   as_tibble() %>%
   select(cruise, Cruise.ID, Location, Year, Month) %>%
+  mutate(Month = trimws(Month)) %>% 
+  mutate(Month = match(Month, month.name)) %>% 
   arrange(Year, Month)
 ids_seaflow = meta_data %>% select(Cruise.ID, Year, Month)
 
-## (Commented out) Ask CMAP which cruises exist there.
+
+## Ask CMAP which cruises exist there (Not run now; loaded from file).
 ## ids_in_cmap = get_cruises() %>% pull(Name)
 ## saveRDS(ids_in_cmap, file = "ids_in_cmap.RDS")
 ids_in_cmap = readRDS(file.path(outputdir, "ids_in_cmap.RDS"))
 
 ## Out of all seaflow cruises, focus on those between 2013 and 2019
-ids_seaflow = ids_seaflow %>% filter(Cruise.ID %in% ids_in_cmap) %>% arrange(Year, Month)
-begin = which(ids_seaflow$Cruise.ID == "KM1314")
-end = which(ids_seaflow$Cruise.ID == "KOK1803")
-ids_final = ids_seaflow[begin:end,]  %>% pull(Cruise.ID)
+ids_seaflow = ids_seaflow %>% filter(Cruise.ID %in% ids_in_cmap) %>%
+  select(Cruise.ID, Year, Month) %>%
+  arrange(Year, Month)
+## begin = which(ids_seaflow$Cruise.ID == "KM1314")
+## end = which(ids_seaflow$Cruise.ID == "KOK1803")
+## ids_final = ids_seaflow[begin:end,]  %>% pull(Cruise.ID)
+ids_final = ids_seaflow %>% dplyr::filter(Year %in% c(2013:2018)) %>% pull(Cruise.ID)
 
 ## PAR is missing or erroneous for these cruises:
 ids_final = ids_final[-which(ids_final %in% c("TN291", "TN292", "CN13ID",
@@ -86,16 +104,24 @@ ids_final = ids_final[-which(ids_final %in% c("TN291", "TN292", "CN13ID",
 ## There's too little data in these cruises.
 ids_final = ids_final[-which(ids_final %in% c("KOK1512", "KM1603", "KM1823"))]  
 
-## Save the final cruise list.
-meta_data %>% filter(Cruise.ID %in% ids_final) %>% kable() %>% print()
+## There's no covariates in these last three cruises of 2018
+ids_final = ids_final[-which(ids_final %in% c("RR1814", "KM1821", "RR1815"))]  
 
-saveRDS(ids_final, file = here::here("data", base, "ids_final"))
+## Save the final cruise list.
+meta_data %>% filter(Cruise.ID %in% ids_final) %>%
+  arrange(Year, Month) %>% 
+kable() %>% print()
+
+saveRDS(ids_final, file = here::here("data", base, "ids_final.RDS"))
 ```
 
 Also, here's the list of CMAP variables we'll use:
 
 ```{r, results = "asis"}
 vars = read.csv(file = file.path("/home/sangwonh/repos/cruisedat", "CMAP_vars_all_cruises.csv")) %>% as_tibble()
+vars %>% mutate(Table_Name = str_replace_all(Table_Name,
+                                             pattern = "tblWind_NRT",
+                                             replacement = "tblWind_NRT_deprecated")) %>% kable() %>% print()
 vars %>% kable() %>% print()
 ```
 
@@ -263,8 +289,27 @@ datlist_combined = datlist_combined_lagged   ##.["KN210-04"] %>%
 The CMAP variables can be downloaded using this script (not run now):
 
 ```{r colocalize, eval = FALSE}
+## Get the tolerances for colocalization.
+base = "00-covariates"
 source(here::here("data", base, "colocalize-params.R"))
+
+## Temporarily placing here (redundant)
+ids_final = readRDS(file = here::here("data", base, "ids_final.RDS"))
+vars = read.csv(file = file.path("/home/sangwonh/repos/cruisedat", "CMAP_vars_all_cruises.csv")) %>% as_tibble()
+vars = vars %>% mutate(Table_Name = str_replace_all(Table_Name,
+                                             pattern = "tblWind_NRT",
+                                             replacement = "tblWind_NRT_deprecated")) ##%>% kable() %>% print()
+vars %>% kable() %>% print()
+nvar = nrow(vars)
+## End of temporary
+
+
 datlist = mclapply(ids_final, function(id){
+
+  ## Safely restarting cruises that don't exist
+  if(file.exists(file = file.path(outputdir, "cmap-data", paste0(id, "-adaptive.RDS")))) return(NULL)
+
+  ## Colocalize all variables
   reslist = lapply(1:nvar, function(ivar){
     tryCatch({
 
@@ -281,6 +326,8 @@ datlist = mclapply(ids_final, function(id){
         ## Increase the radius
         if(isize > 1) param$latTolerance = param$latTolerance + 0.1
         if(isize > 1) param$lonTolerance = param$lonTolerance + 0.1
+
+        ## Perform the colocalization
         dt = along_track(id,
                          targetTables = tabname,
                          targetVars = varname,
@@ -290,12 +337,14 @@ datlist = mclapply(ids_final, function(id){
                          depthTolerance = param$depthTolerance,
                          depth1 = param$depth1,
                          depth2 = param$depth2) %>% as_tibble() 
-        dt_small = dt %>% dplyr::select(!contains("_std"))
-        dt_small_missing_prop = dt_small %>% summarize(naprop = mean(is.na(!!sym(varname)))) %>% unlist()
-        print(dt_small_missing_prop)
-        if(dt_small_missing_prop == 0) break
+        dt = dt %>% dplyr::select(!contains("_std"))
+
+        ## Check the missing proportion
+        dt_missing_prop = dt %>% summarize(naprop = mean(is.na(!!sym(varname)))) %>% unlist()
+        ## print(dt_missing_prop)
+        if(dt_missing_prop == 0) break
       }
-      return(dt_small)
+      return(dt)
     }, error = function(e){
       return(NULL)
     })
@@ -305,7 +354,8 @@ datlist = mclapply(ids_final, function(id){
   if(length(reslist) > 0){
     fullres = reslist %>% purrr::reduce(full_join, by = c("time", "lon", "lat"))
     fullres = fullres %>% dplyr::select(!contains("_std"))
-    saveRDS(fullres, file = file.path(outputdir, paste0(id, "-adaptive.RDS")))
+    saveRDS(fullres, file = file.path(outputdir, "cmap-data", paste0(id, "-adaptive.RDS")))
+    ## saveRDS(fullres, file = file.path(outputdir, "cmap-data", paste0(id, "-adaptive.RDS")))
     return(NULL)
   }
   return(NULL)
@@ -318,12 +368,14 @@ Running this code produces `datlist`, accessed last in 2021-07-20. We'll save
 this to a file, and summarize using a heatmap of data availability, for each
 cruise and variable.
 
-```{r load-cmap, fig.width=6, fig.height=6}
+```{r load-cmap, fig.width=8, fig.height=9}
 ## Read in all the data points
 ## filename0 = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
+## filename0 = here::here("data", base, "cmap-data", paste0("MGL1704", "-adaptive", ".RDS"))
 filename0 = here::here("data", base, "cmap-data", paste0("MGL1704", "-adaptive", ".RDS"))
 fullres0 = readRDS(file = filename0) %>% add_column(id = "MGL1704") %>% .[c(),]
 datlist_cmap = sapply(ids_final, function(id){
+  ## filename = here::here("data", base, "cmap-data", paste0(id, "-adaptive", ".RDS"))
   filename = here::here("data", base, "cmap-data", paste0(id, "-adaptive", ".RDS"))
   ## filename = file.path(outputdir, paste0(id, "-adaptive", ".RDS"))
   if(file.exists(filename)){
@@ -333,7 +385,10 @@ datlist_cmap = sapply(ids_final, function(id){
 ## saveRDS(datlist, file = file.path(outputdir, "datlist.RDS"))
 
 ## Make a plot of CMAP data availability
-plot_frequency(datlist_cmap)
+sorted_names = 
+  mynames = names(datlist_cmap)
+  sorted_mynames = meta_data %>% filter(Cruise.ID %in% mynames) %>% arrange(Year, Month) %>% pull(Cruise.ID)
+plot_frequency(datlist_cmap[sorted_mynames])
 ```
 
 The pipeline is:
@@ -366,7 +421,7 @@ combined_dat = Map(function(x,y){ inner_join(x,y, by = c("id", "time")) },
 
 Step 3 is here:
 
-```{r fill, fig.width =6, fig.height = 6}
+```{r fill}
 ## Complete the non-cruise data once more.
 combined_dat_complete = combined_dat %>%
   purrr::map(. %>%  mutate_at(vars(-time, -lat, -lon, -contains("par"), -sss_cruise, -sst_cruise, -id),
@@ -395,7 +450,7 @@ print(p)
 Remove all the rows with any NAs; the summarizing heatmap should have all 1's or
 NA's (grey) now.
 
-```{r remove-na, fig.width=5, fig.height=5}
+```{r remove-na, fig.width=8, fig.height=9}
 ## Remove all rows with any NAs 
 combined_dat_complete = combined_dat_complete %>% lapply(., function(a){
   if(nrow(a) == 0) return(a)
@@ -411,7 +466,7 @@ plot_frequency(combined_dat_complete)
 Lastly, scale all variables EXCEPT par, which has already been scaled. 
 
 The scaling will be done one variable at a time, by pooling all measurements
-from all cruises and applying a common scaling.
+from all cruises and applying a **common scaling**.
 
 Then, save to RDS files.
 
@@ -532,7 +587,7 @@ for(chunk in chunks){
 
 
 ```{sh}
-from=~/repos/flowmixapp/data/00-covariates/cleaned/*-covariates-scaled.RDS
+from=~/repos/flowmixapp/data/00-covariates/cleaned/*-covariates-common-scaled.RDS
 to=sangwonh@discovery.usc.edu:repos/flowmixapp/data/00-covariates/cleaned/.
 scp -r $from $to
 ```

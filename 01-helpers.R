@@ -115,3 +115,27 @@ identify_boundary_points_1d <- function(y1d, qc){
   print(paste(prop, "deleted!"))
   return(ind_to_delete)
 }
+
+
+
+##' Removes data from the top until the largest bin (of a 100-bin weighted
+##' histogram) is not too unusual (smaller than mean + 1 std of the other bins).
+##'
+##' @param y1d 1 dimensional particles
+##' @param qc accompanying qc for particles
+##'
+##' @return Indices to remove.
+identify_boundary_points_1d <- function(y1d, qc){
+  for(prop in seq(from=0.001, to=0.05, by = 0.001)){
+    ind_to_delete = identify_boundary_points_1d_no_qc(y1d, prop)
+    y1d_trimmed = y1d[-ind_to_delete]
+    qc_trimmed = qc[-ind_to_delete]
+    res = plotrix::weighted.hist(y1d_trimmed, qc_trimmed, breaks = 100, plot = FALSE)
+    tail_count = res$density[length(res$density)]
+    avg = res$density[-length(res$density)] %>% mean()
+    std = res$density[-length(res$density)] %>% sd()
+    if(tail_count < avg + std) break
+  }
+  print(paste(prop, "deleted!"))
+  return(ind_to_delete)
+}
